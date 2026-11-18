@@ -33,7 +33,7 @@ class Score:
 
 
 def crap(complexity: int, coverage: float) -> float:
-    return round(complexity**2 * (1 - coverage) ** 3 + complexity, 2)
+    return complexity**2 * (1 - coverage) ** 3 + complexity
 
 
 def decisions(node: ast.AST) -> int:
@@ -206,7 +206,7 @@ def score_file(
             raise InputError(
                 report_path, f"{where} starts on line {line}, not a def of that name"
             )
-        yield from name_scores(file, name, found, entry, summary, report_path)
+        yield from name_scores(file, name, found, line, entry, summary, report_path)
     if named:
         name, found = min(named.items(), key=lambda item: item[1][0].lineno)
         raise InputError(
@@ -218,23 +218,23 @@ def name_scores(
     file: str,
     name: str,
     found: list[Definition],
+    line: int,
     entry: dict[str, object],
     summary: dict[str, object],
     report_path: str,
 ) -> Iterator[Score]:
     """Score the defs that share name; later ones are named name#2, name#3.
 
-    coverage.py reports one region per name, the last def's, so when defs
-    share a name, such as a property's getter and setter, each is measured
-    from the file's lines instead.
+    coverage.py reports one region per name, for the def that starts on line,
+    so another def of that name, such as a property's getter beside its
+    setter, is measured from the file's lines instead.
     """
-    shares = (
-        [region_coverage(summary, report_path, f"{file} function {name}")]
-        if len(found) == 1
-        else [
-            lines_coverage(entry, own_lines(node), report_path, file) for node in found
-        ]
-    )
+    shares = [
+        region_coverage(summary, report_path, f"{file} function {name}")
+        if node.lineno == line
+        else lines_coverage(entry, own_lines(node), report_path, file)
+        for node in found
+    ]
     for index, (node, share) in enumerate(zip(found, shares, strict=True), 1):
         count = complexity(node)
         key = name if index == 1 else f"{name}#{index}"

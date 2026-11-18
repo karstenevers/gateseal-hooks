@@ -40,7 +40,7 @@ Record each file it lists in `.token-budgets.toml`, at the next 500 above its si
 "README.md" = 12500
 ```
 
-A file with a budget may shrink but not grow. When it shrinks by more than 500 tokens, the hook asks you to lower its budget. When it fits the cap, the hook asks you to remove it. Do not add a budget for a new file. Split the file.
+A file with a budget may not grow past it. When it shrinks by more than 500 tokens, the hook asks you to lower its budget. When it fits the cap, the hook asks you to remove it. Do not add a budget for a new file. Split the file.
 
 **Options.** `--cap 12000` sets another cap. `--budgets path.toml` reads the budgets from another file.
 

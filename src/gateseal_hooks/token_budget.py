@@ -3,7 +3,7 @@
 A file's tokens are its size in bytes divided by 4, rounded up. A file passes
 at the cap or below. A file in the budgets file passes at its budget instead,
 which records a file that was already over the cap when the repository
-adopted it. Such a file may shrink but not grow.
+adopted it. Such a file may not grow past its budget.
 """
 
 import argparse
@@ -110,7 +110,7 @@ def size_findings(
         elif count > budget:
             yield (
                 f"{path}: about {count:,} tokens, over its budget of {budget:,}. "
-                "It may shrink but not grow."
+                "Split the file. Do not raise its budget."
             )
 
 
@@ -161,6 +161,8 @@ def main(argv: list[str] | None = None) -> int:
     except InputError as error:
         print(f"token-budget: {error}", file=sys.stderr)
         return 1
+    if budgets_path in {Path(file) for file in files}:
+        files = [*files, *(path for path in budgets if Path(path).is_file())]
     oversized = list(size_findings(files, cap, budgets))
     stale = list(budget_findings(files, cap, budgets))
     if oversized:

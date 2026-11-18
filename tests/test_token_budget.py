@@ -76,7 +76,7 @@ def test_file_over_its_budget_fails(root, capsys):
     assert code == 1
     assert out[0] == (
         "big.md: about 12,001 tokens, over its budget of 12,000. "
-        "It may shrink but not grow."
+        "Split the file. Do not raise its budget."
     )
 
 
@@ -119,6 +119,26 @@ def test_budget_of_a_missing_file_fails(root, capsys):
     name = write(root, "small.py", 10)
     budgets(root, '[budgets]\n"gone.md" = 12000\n')
     code, out, _ = run(capsys, name)
+    assert code == 1
+    assert out[0] == "gone.md: has a budget but is not a file. Rename or remove it."
+
+
+def test_changed_budgets_file_checks_every_budgeted_file(root, capsys):
+    write(root, "big.md", 40_000)
+    write(root, "loose.md", 40_000)
+    budgets(root, '[budgets]\n"big.md" = 9500\n"loose.md" = 12000\n')
+    code, out, _ = run(capsys, ".token-budgets.toml")
+    assert code == 1
+    assert out[0] == (
+        "big.md: about 10,000 tokens, over its budget of 9,500. "
+        "Split the file. Do not raise its budget."
+    )
+    assert out[-2].startswith("loose.md: about 10,000 tokens, more than 500 under")
+
+
+def test_changed_budgets_file_with_a_missing_file_names_it(root, capsys):
+    budgets(root, '[budgets]\n"gone.md" = 12000\n')
+    code, out, _ = run(capsys, ".token-budgets.toml")
     assert code == 1
     assert out[0] == "gone.md: has a budget but is not a file. Rename or remove it."
 

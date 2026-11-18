@@ -93,6 +93,13 @@ def test_function_just_over_the_limit_fails(root, capsys):
     assert summary == "2 functions scored, 1 over the limit of 10"
 
 
+def test_score_just_over_the_limit_fails_although_it_prints_as_the_limit(root, capsys):
+    report = project(root, {"m.py": branchy("f", 10)}, {"f": (89, 90, 0, 0)})
+    code, rows, _ = check(capsys, report)
+    assert code == 1
+    assert rows == [("m.py", "f", "10.00", "10", "98.9%")]
+
+
 def test_coverage_counts_statements_and_branches(root, capsys):
     report = project(root, {"m.py": branchy("f", 5)}, {"f": (1, 2, 0, 2)})
     code, rows, _ = check(capsys, report)
@@ -190,6 +197,21 @@ def test_bad_input_fails_naming_the_file(root, capsys, breakage, named):
     error = capsys.readouterr().err
     assert code == 1
     assert error.count("\n") == 1 and named in error
+
+
+def test_repeated_name_takes_the_region_summary_for_the_def_it_starts_on(root):
+    report = project(root, {"m.py": branchy("f", 1) * 2})
+    edit_json(
+        report,
+        lambda report: report["files"]["m.py"].update(
+            executed_lines=[],
+            missing_lines=[2, 4],
+            executed_branches=[],
+            missing_branches=[],
+        ),
+    )
+    coverage = {score.function: score.coverage for score in crap.read_report(report)}
+    assert coverage == {"f": 0.0, "f#2": 1.0}
 
 
 COMPLEXITY = {
@@ -398,7 +420,7 @@ def test_real_report_scores_every_function(measured, monkeypatch):
     monkeypatch.chdir(measured)
     scored = {
         (score.file, score.function): (
-            score.score,
+            round(score.score, 2),
             score.complexity,
             round(score.coverage, 4),
         )
