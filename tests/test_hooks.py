@@ -33,7 +33,7 @@ def repository(tmp_path, environment):
 
 def try_hook(repository, environment, hook, *options):
     subprocess.run(["git", "add", "-A"], cwd=repository, env=environment, check=True)
-    command = ["pre_commit", "try-repo", str(HOOKS), hook, "--all-files", *options]
+    command = ["pre_commit", "try-repo", str(HOOKS), hook, *options]
     return subprocess.run(
         [sys.executable, "-m", *command],
         cwd=repository,
@@ -47,7 +47,7 @@ def try_hook(repository, environment, hook, *options):
 def test_token_budget_fails_a_file_over_the_cap(repository, environment):
     (repository / "small.py").write_text("x = 1\n")
     (repository / "big.md").write_bytes(b"word " * 8_000)
-    result = try_hook(repository, environment, "token-budget")
+    result = try_hook(repository, environment, "token-budget", "--all-files")
     assert result.returncode == 1, result.stdout + result.stderr
     assert "big.md: about 10,000 tokens, over the cap of 9,000." in result.stdout
     assert "small.py" not in result.stdout
@@ -56,8 +56,26 @@ def test_token_budget_fails_a_file_over_the_cap(repository, environment):
 def test_token_budget_passes_a_budgeted_file(repository, environment):
     (repository / "big.md").write_bytes(b"word " * 8_000)
     (repository / ".token-budgets.toml").write_text('[budgets]\n"big.md" = 10500\n')
-    result = try_hook(repository, environment, "token-budget")
+    result = try_hook(repository, environment, "token-budget", "--all-files")
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_token_budget_runs_when_a_commit_only_deletes_a_budgeted_file(
+    repository, environment
+):
+    (repository / "big.md").write_bytes(b"word " * 8_000)
+    (repository / ".token-budgets.toml").write_text('[budgets]\n"big.md" = 10500\n')
+    subprocess.run(["git", "add", "-A"], cwd=repository, env=environment, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "add"],
+        cwd=repository,
+        env=environment,
+        check=True,
+    )
+    (repository / "big.md").unlink()
+    result = try_hook(repository, environment, "token-budget")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "big.md: has a budget but is not a file." in result.stdout
 
 
 def test_crap_score_reads_a_real_coverage_report(repository, environment):
@@ -93,7 +111,9 @@ def test_crap_score_reads_a_real_coverage_report(repository, environment):
             check=True,
             capture_output=True,
         )
-    result = try_hook(repository, environment, "crap-score", "--hook-stage", "manual")
+    result = try_hook(
+        repository, environment, "crap-score", "--all-files", "--hook-stage", "manual"
+    )
     assert result.returncode == 1, result.stdout + result.stderr
     assert "shapes.py  untested  20.00           4      0.0%" in result.stdout
     assert "2 functions scored, 1 over the limit of 10" in result.stdout
