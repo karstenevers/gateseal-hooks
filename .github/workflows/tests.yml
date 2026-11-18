@@ -1,0 +1,49 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  tests:
+    name: tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.14.10"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+        with:
+          version: "0.13.6"
+          python-version: ${{ matrix.python }}
+          enable-cache: false
+      - name: Provision the development environment
+        run: uv sync --locked --python "${{ matrix.python }}"
+      - name: Check strict types
+        run: uv run pyright
+      - name: Run the tests under coverage
+        run: |
+          uv run coverage run -m pytest -q
+          uv run coverage json
+      - name: Run the repository's hooks on itself
+        run: |
+          uv run pre-commit run --all-files --show-diff-on-failure
+          uv run pre-commit run crap-score --hook-stage manual --all-files

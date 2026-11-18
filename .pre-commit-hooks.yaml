@@ -1,0 +1,15 @@
+- id: token-budget
+  name: file token budget
+  description: Fail when a file is over the token cap or over its own budget.
+  entry: token-budget
+  language: python
+  types: [text]
+  require_serial: true
+- id: crap-score
+  name: CRAP score
+  description: Fail when a function's CRAP score is over the limit. Reads a coverage.py JSON report.
+  entry: crap-score
+  language: python
+  types: [python]
+  require_serial: true
+  stages: [manual]
