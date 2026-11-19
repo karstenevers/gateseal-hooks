@@ -121,7 +121,6 @@ class Unit:
     """
 
     name: str
-    line: int
     complexity: int = 1
     statements: int = 0
     covered: int = 0
@@ -210,11 +209,7 @@ def parameters(node: Node) -> Node | None:
 
 
 def unit_of(
-    node: Node,
-    scope: tuple[str, ...],
-    around: Span | None,
-    seen: dict[str, int],
-    line: int,
+    node: Node, scope: tuple[str, ...], around: Span | None, seen: dict[str, int]
 ) -> tuple[Unit, tuple[str, ...]]:
     """Return a function's unit and the scope of the names inside the function.
 
@@ -230,7 +225,7 @@ def unit_of(
     dotted = ".".join(scope)
     seen[dotted] = seen.get(dotted, 0) + 1
     numbered = dotted if seen[dotted] == 1 else f"{dotted}#{seen[dotted]}"
-    return Unit(numbered, line), scope
+    return Unit(numbered), scope
 
 
 def spans_of(root: Node, source: bytes) -> list[Span]:
@@ -245,7 +240,7 @@ def spans_of(root: Node, source: bytes) -> list[Span]:
         code = parameters(node)
         if code is not None:
             start = at(node.start_byte)
-            unit, scope = unit_of(node, scope, owner(spans, start), seen, start[0])
+            unit, scope = unit_of(node, scope, owner(spans, start), seen)
             spans.append(Span(start, at(code.start_byte), at(node.end_byte), unit))
         elif holder := scope_name(node):
             scope = (*scope, holder)
@@ -359,18 +354,15 @@ def tally(spans: list[Span], entry: dict[str, object], path: str, file: str) -> 
             span.unit.calls = (span.unit.calls or 0) + count
 
 
-def coverage(unit: Unit, path: str, file: str) -> float:
+def coverage(unit: Unit) -> float:
     """Return the share of the unit's statements and branches that ran.
 
-    A function that the report says never ran scores 0. One without statements
-    or branches, such as an empty function, scores 1 when it ran.
+    A function scores 0 when the report says that it never ran, or says nothing
+    about it. One without statements or branches, such as an empty function,
+    scores 1 when it ran.
     """
-    if unit.calls == 0:
+    if unit.calls == 0 or not (unit.calls or unit.statements or unit.branches):
         return 0.0
-    if unit.calls is None and not unit.statements + unit.branches:
-        raise InputError(
-            path, f"has no data for {unit.name} on {file} line {unit.line}"
-        )
     return share(unit.covered, unit.statements, unit.covered_branches, unit.branches)
 
 
@@ -391,7 +383,7 @@ def file_scores(path: str, file: str, value: object) -> list[Score]:
     scores: list[Score] = []
     # A unit comes once for its function and once for each callback in it.
     for unit in dict.fromkeys(span.unit for span in spans):
-        measured = coverage(unit, path, file)
+        measured = coverage(unit)
         score = crap(unit.complexity, measured)
         scores.append(Score(file, unit.name, score, unit.complexity, measured))
     return scores

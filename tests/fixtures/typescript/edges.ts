@@ -27,6 +27,7 @@ export function choose(flag: boolean) {
 
 export const curried = (a: number) => (b: number) => (a > b ? a : b);
 export const thunk = () => () => 1;
+export const hollow = () => () => {};
 
 const pass = <F>(fn: F): F => fn;
 

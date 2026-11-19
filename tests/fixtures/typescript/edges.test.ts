@@ -10,6 +10,7 @@ import {
   choose,
   curried,
   thunk,
+  hollow,
   named,
   held,
   passed,
@@ -34,6 +35,7 @@ test("edges", async () => {
   assert.equal(either(), 3);
   assert.equal(typeof curried(1), "function");
   assert.equal(typeof thunk(), "function");
+  hollow()();
   assert.equal(named(), 1);
   assert.equal(typeof held(), "function");
   assert.equal(passed(() => 2)(), 2);

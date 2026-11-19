@@ -82,9 +82,9 @@ pre-commit run crap-score-typescript --hook-stage manual --all-files
 
 Complexity is 1 plus each `if`, loop, `catch`, `case`, `? :`, `&&`, `||` and `??` in the function. Optional chaining such as `a?.b` does not count. Each named function is scored on its own: functions, methods, arrow functions in a variable, a class field, an object or a default value, and functions nested inside them. A callback without a name counts in the function around it.
 
-A function's code is its parameters and body. Its name and a computed key count in the code around it. A function that the report says never ran scores 0%.
+A function's code is its parameters and body. Its name and a computed key count in the code around it. A function scores 0% when the report says that it never ran, or says nothing about it.
 
-The hook fails when a source file does not parse, or when the report has no data for a function. Leave test files out with `exclude`, as they are not in the report. The hook rejects a c8 report, because c8 counts whole lines. With Jest, keep the default coverage provider.
+The hook fails when a source file does not parse. Leave test files out with `exclude`, as they are not in the report. The hook rejects a c8 report, because c8 counts whole lines. With Jest, keep the default coverage provider.
 
 The parsers come from three pinned packages, which pre-commit installs with the hook. Nothing is downloaded when it runs.
 

@@ -66,6 +66,8 @@ EDGES = [
     # thunk ran, but Vitest reports its call and its own statement at the
     # variable name, outside the function. Only the inner statement is left.
     ("src/edges.ts", "thunk", "2.00", 1, "0.0%"),
+    # hollow ran too. With an empty inner arrow, nothing is left in its code.
+    ("src/edges.ts", "hollow", "2.00", 1, "0.0%"),
     ("src/edges.ts", "pass", "2.00", 1, "0.0%"),
     ("src/edges.ts", "named", "1.00", 1, "100.0%"),
     ("src/edges.ts", "named.inner", "1.00", 1, "100.0%"),
@@ -159,7 +161,7 @@ def test_main_fails_on_the_cases_over_the_limit(root, capsys):
         "wrapped",
         "jsUntestedBranchy",
     ]
-    assert out[-1] == "58 functions scored, 9 over the limit of 10"
+    assert out[-1] == "59 functions scored, 9 over the limit of 10"
 
 
 def test_named_files_limit_the_scores(root):
@@ -237,12 +239,6 @@ def test_c8_report_fails(root):
 def test_syntax_error_that_can_change_a_score_fails(root, source):
     name = write(root, "broken.ts", source)
     with pytest.raises(typescript.InputError, match="broken.ts: cannot parse"):
-        typescript.read_report(report_of(root, name))
-
-
-def test_function_without_data_in_the_report_fails(root):
-    name = write(root, "a.ts", "export const f = (x: number) => (x > 0 ? 1 : 2);\n")
-    with pytest.raises(typescript.InputError, match="has no data for f on a.ts line 1"):
         typescript.read_report(report_of(root, name))
 
 
