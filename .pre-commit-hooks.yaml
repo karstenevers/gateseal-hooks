@@ -1,0 +1,31 @@
+- id: token-budget
+  name: file token budget
+  description: Fail when a file is over the token cap or over its own budget.
+  entry: token-budget
+  # pre-commit appends file names, which may start with -.
+  args: [--]
+  language: python
+  types: [text]
+  require_serial: true
+  always_run: true
+- id: crap-score-python
+  name: CRAP score (Python)
+  description: Fail when a Python function's CRAP score is over the limit. Reads a coverage.py JSON report.
+  entry: crap-score-python
+  args: [--]
+  language: python
+  types: [python]
+  require_serial: true
+  stages: [manual]
+- id: crap-score-typescript
+  name: CRAP score (TypeScript)
+  description: Fail when a TypeScript or JavaScript function's CRAP score is over the limit. Reads an Istanbul JSON coverage report.
+  entry: crap-score-typescript
+  args: [--]
+  language: python
+  additional_dependencies: [tree-sitter==0.26.1, tree-sitter-javascript==0.25.0, tree-sitter-typescript==0.23.2]
+  types: [text]
+  # identify gives .mts and .cts no type tag.
+  files: \.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$
+  require_serial: true
+  stages: [manual]
