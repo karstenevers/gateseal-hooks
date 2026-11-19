@@ -91,5 +91,11 @@ export const noted = () => (
   }
 ) as unknown;
 
+export const typed = () => <unknown>(
+  function plain(a: boolean, b: boolean) {
+    return a && b ? 1 : 2;
+  }
+);
+
 export const split =
   () => (x: number) => (x ? 1 : x ? 2 : 3);

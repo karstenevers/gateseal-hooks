@@ -234,11 +234,13 @@ def body(node: Node) -> Node:
     """Return the body of a function without what is around its value.
 
     Istanbul ends a function where that value ends, before a `)` that closes
-    the body and before a type that `as` gives it.
+    the body and before a type that `as` gives it. In `<T>value` the value
+    comes last.
     """
     inner = node.child_by_field_name("body") or node
-    while inner.type in TRANSPARENT and inner.type != "type_assertion":
-        inner = next(child for child in inner.named_children if child.type != "comment")
+    while inner.type in TRANSPARENT:
+        parts = [child for child in inner.named_children if child.type != "comment"]
+        inner = parts[-1 if inner.type == "type_assertion" else 0]
     return inner
 
 
