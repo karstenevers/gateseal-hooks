@@ -406,6 +406,16 @@ FIXTURE = {
             @size.setter
             def size(self, value):
                 self._size = value
+
+            @property
+            def limit(self):
+                if self._size > 5:  # pragma: no branch
+                    return 5
+                return self._size
+
+            @limit.setter
+            def limit(self, value):
+                self._size = value
         """,
     "pkg/unused.py": """
         def lonely(x):
@@ -427,6 +437,8 @@ FIXTURE = {
         box = Box()
         box.size = 3
         assert box.size == 3
+        box.limit = 9
+        assert box.limit == 5
         """,
 }
 
@@ -472,6 +484,9 @@ def test_real_report_scores_every_function(measured, monkeypatch):
         ("pkg/used.py", "idle"): (12.0, 3, 0.0),
         ("pkg/used.py", "Box.size"): (2.26, 2, 0.6),
         ("pkg/used.py", "Box.size#2"): (1.0, 1, 1.0),
+        # 2 of 3 lines ran. The pragma waives the branch that did not run.
+        ("pkg/used.py", "Box.limit"): (2.03, 2, 0.8),
+        ("pkg/used.py", "Box.limit#2"): (1.0, 1, 1.0),
         ("pkg/unused.py", "lonely"): (6.0, 2, 0.0),
         ("pkg/unused.py", "Ghost.haunt"): (12.0, 3, 0.0),
     }
@@ -485,7 +500,7 @@ def test_real_report_fails_on_untested_functions(measured, monkeypatch, capsys):
         ("pkg/unused.py", "Ghost.haunt", "12.00", "3", "0.0%"),
         ("pkg/used.py", "idle", "12.00", "3", "0.0%"),
     ]
-    assert summary == "11 functions scored, 2 over the limit of 10"
+    assert summary == "13 functions scored, 2 over the limit of 10"
 
 
 def test_defaults_read_coverage_json_with_a_limit_of_10(root, capsys):

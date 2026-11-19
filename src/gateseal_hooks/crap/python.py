@@ -136,11 +136,16 @@ def lines_coverage(
         branch_sources(entry.get(name), path, f"{file} {name}")
         for name in ("executed_branches", "missing_branches")
     )
+    taken = [line for line in hit if line in lines]
+    listed = taken + [line for line in missed if line in lines]
+    # A line that branches has 2 branches or more. coverage.py lists only one
+    # when `# pragma: no branch` waives the other, and counts that one as covered.
+    waived = sum(listed.count(line) == 1 for line in set(listed))
     return share(
         len(executed & lines),
         len((executed | missing) & lines),
-        sum(line in lines for line in hit),
-        sum(line in lines for line in hit + missed),
+        len(taken) + waived,
+        len(listed) + waived,
     )
 
 
