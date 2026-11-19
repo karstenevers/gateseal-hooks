@@ -84,7 +84,7 @@ Complexity is 1 plus each `if`, loop, `catch`, `case`, `? :`, `&&`, `||` and `??
 
 A function's code is its parameters and body. Its name and a computed key count in the code around it. A function scores 0% when the report says that it never ran, or says nothing about it.
 
-The hook fails when a source file does not parse. Leave test files out with `exclude`, as they are not in the report. The hook rejects a c8 report, because c8 counts whole lines. With Jest, keep the default coverage provider. With Vitest, the `istanbul` provider counts default values and computed method names more exactly than `v8`.
+The hook fails when a source file does not parse. Its parser does not know some newer syntax, such as a type `import("./a").Box<string>` or a variable with the name `using`. Leave test files out with `exclude`, as they are not in the report. The hook rejects a c8 report, because c8 counts whole lines. With Jest, keep the default coverage provider. With Vitest, the `istanbul` provider counts default values and computed method names more exactly than `v8`.
 
 The parsers come from three pinned packages, which pre-commit installs with the hook. Nothing is downloaded when it runs.
 
