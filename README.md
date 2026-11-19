@@ -69,7 +69,18 @@ pre-commit run crap-score-python --hook-stage manual --all-files
 
 Run coverage.py from the repository root, so the report names files the way pre-commit does. The hook scores only the files pre-commit gives it. With `files: ^src/` it skips the tests. To score only the files that a pull request changes, run it with `--from-ref origin/main --to-ref HEAD` in place of `--all-files`. The hook fails when the report does not measure a file it gets. Add the file to coverage.py's `source`, or leave it out with `files` or `exclude`.
 
-**Options.** `--coverage path.json` reads another report. `--limit 15` sets another limit.
+**Adopt it in a repository with complex functions.** Run the hook on every file once. Record each function it lists in `.crap-baseline.toml`, with its score:
+
+```toml
+[baseline."src/shapes.py"]
+"Shape.area" = 24.5
+```
+
+A function on the baseline passes until its score grows past its entry. When it falls to the limit or below, or when it is gone, the hook asks you to remove its entry. Do not add an entry for new code. Split or test the function.
+
+When pre-commit checks a push or a range, the hook compares the baseline with its version at the start of the range. A change that adds an entry or raises one then fails. A change that touches no Python file does not start the hook, so review each change to the baseline.
+
+**Options.** `--coverage path.json` reads another report. `--limit 15` sets another limit. `--config path.toml` reads the limit from a file that holds only `limit = 15`. `--baseline path.toml` reads the baseline from another file.
 
 ## crap-score-typescript
 
@@ -88,7 +99,7 @@ The hook fails when a source file does not parse. Its parser does not know some 
 
 The parsers come from three pinned packages, which pre-commit installs with the hook. Nothing is downloaded when it runs.
 
-**Options.** `--coverage path.json` reads another report. `--limit 15` sets another limit.
+It takes the same baseline, and the same options as `crap-score-python`.
 
 ## Mutation testing
 

@@ -17,6 +17,7 @@ import tree_sitter_javascript
 import tree_sitter_typescript
 from tree_sitter import Language, Node, Parser
 
+from gateseal_hooks.crap.baseline import load_baseline
 from gateseal_hooks.crap.inputs import (
     InputError,
     arguments,
@@ -487,7 +488,9 @@ def main(argv: list[str] | None = None) -> int:
     options = arguments(argv, __doc__, default_coverage="coverage/coverage-final.json")
     try:
         scores = read_report(options.coverage, options.files)
+        baseline = load_baseline(options.baseline)
     except InputError as error:
         print(f"crap-score-typescript: {error}", file=sys.stderr)
         return 1
-    return report(scores, options.limit)
+    findings = baseline.findings(scores, options.limit)
+    return report(scores, options.limit, baseline.allows, findings)
