@@ -184,23 +184,72 @@ def test_function_that_ran_without_statements_of_its_own_is_covered(root):
     assert rows(typescript.read_report(report)) == [("a.ts", "f", "1.00", 1, "100.0%")]
 
 
-def test_function_the_report_starts_earlier_on_its_line_is_matched(root):
-    name = write(root, "a.ts", "export function f(): number {\n  return 1;\n}\n")
-    report = report_of(
-        root, name, [statement(2, None, 1)], [(statement(1, 0, 0)[0], 0)]
-    )
-    assert rows(typescript.read_report(report)) == [("a.ts", "f", "2.00", 1, "0.0%")]
+DEFAULT = "export function outer(cb = function inner() {}) { return cb(); }\n"
 
 
-def test_branch_arm_without_a_location_takes_the_branch_start(root):
-    name = write(root, "a.ts", ONE_LINER)
-    branch = (
-        {"start": {"line": 1, "column": 32}},
-        [{"start": {"line": None}}, {}],
-        [1, 0],
-    )
-    report = report_of(root, name, branches=[branch])
-    assert rows(typescript.read_report(report)) == [("a.ts", "f", "2.50", 2, "50.0%")]
+@pytest.mark.parametrize(
+    ("outer", "inner"),
+    [((1, 48), (1, 44)), ((1, 7), (1, 27))],
+    ids=["istanbul", "c8"],
+)
+def test_function_in_a_default_gets_its_own_calls(root, outer, inner):
+    def at(line, column):
+        return {"start": {"line": line, "column": column}}
+
+    calls = [(at(*outer), 1), (at(*inner), 1)]
+    report = report_of(root, write(root, "a.ts", DEFAULT), [statement(1, 50, 1)], calls)
+    assert rows(typescript.read_report(report)) == [
+        ("a.ts", "outer", "1.00", 1, "100.0%"),
+        ("a.ts", "outer.inner", "1.00", 1, "100.0%"),
+    ]
+
+
+def test_arrow_whose_body_is_a_function_keeps_its_own_calls(root):
+    source = "export const make = () => (/* c */ function made() { return 1; });\n"
+    lines = [statement(1, 35, 1), statement(1, 53, 0)]
+    calls = [(statement(1, 35, 0)[0], 1), (statement(1, 51, 0)[0], 0)]
+    report = report_of(root, write(root, "a.ts", source), lines, calls)
+    assert rows(typescript.read_report(report)) == [
+        ("a.ts", "make", "1.00", 1, "100.0%"),
+        ("a.ts", "make.made", "2.00", 1, "0.0%"),
+    ]
+
+
+def test_function_inside_one_that_never_ran_scores_zero(root):
+    # c8 leaves nested out of fnMap and counts whole lines from column 0.
+    source = """\
+        export function outer(): number {
+          function nested() { return 1; }
+          return nested();
+        }
+        """
+    lines = [statement(line, 0, 0) for line in (1, 2, 3, 4)]
+    calls = [(statement(1, 7, 0)[0], 0)]
+    report = report_of(root, write(root, "a.ts", source), lines, calls)
+    assert rows(typescript.read_report(report)) == [
+        ("a.ts", "outer", "2.00", 1, "0.0%"),
+        ("a.ts", "outer.nested", "2.00", 1, "0.0%"),
+    ]
+
+
+def test_absolute_file_name_matches_the_report(root):
+    name = write(root, "a.ts", "export const f = () => 1;\n")
+    report = report_of(root, name, functions=[(statement(1, 23, 0)[0], 1)])
+    assert len(typescript.read_report(report, [str(root / name)])) == 1
+
+
+def test_branch_without_a_location_counts_its_arms(root):
+    source = "export function f(x: number): number {\n  return x > 0 ? 1 : 2;\n}\n"
+    arms = [{"start": {"line": 2, "column": None}}, {"start": {"line": None}}]
+    report = report_of(root, write(root, "a.ts", source), branches=[({}, arms, [1, 0])])
+    assert rows(typescript.read_report(report)) == [("a.ts", "f", "2.00", 2, "100.0%")]
+
+
+def test_callback_in_a_default_does_not_take_the_function_s_calls(root):
+    source = "export function f(cb = () => 1) { return cb(); }\n"
+    calls = [(statement(1, 32, 0)[0], 1), (statement(1, 29, 0)[0], 0)]
+    report = report_of(root, write(root, "a.ts", source), functions=calls)
+    assert rows(typescript.read_report(report)) == [("a.ts", "f", "1.00", 1, "100.0%")]
 
 
 @pytest.mark.parametrize(

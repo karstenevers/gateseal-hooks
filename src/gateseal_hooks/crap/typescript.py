@@ -101,12 +101,18 @@ class Tally:
     covered: int = 0
     branches: int = 0
     covered_branches: int = 0
-    calls: tuple[Position, int] | None = None
+    calls: tuple[tuple[bool, Position], int] | None = None
 
-    def call(self, at: Position, count: int) -> None:
-        """Keep the earliest function in the report that this unit declares."""
-        if self.calls is None or at < self.calls[0]:
-            self.calls = (at, count)
+    def call(self, unit: Unit, at: Position, count: int) -> None:
+        """Keep the entry that starts at the unit or its body, else the earliest.
+
+        c8 starts `(a) => (b) => a` at a and at b, which is the outer body.
+        Istanbul starts `function f(g = () => 1) {}` at 1, in f's signature, and
+        at f's body.
+        """
+        rank = (at not in (unit.start, unit.body), at)
+        if self.calls is None or rank < self.calls[0]:
+            self.calls = (rank, count)
 
 
 def text(node: Node | None) -> str | None:
@@ -167,8 +173,8 @@ def position(lines: list[bytes], point: tuple[int, int]) -> Position:
 
 def unwrapped(node: Node) -> Node:
     """Istanbul starts `() => (x)`'s body at x, inside the parentheses."""
-    while node.type == "parenthesized_expression" and node.named_children:
-        node = node.named_children[0]
+    while node.type == "parenthesized_expression":
+        node = next(child for child in node.named_children if child.type != "comment")
     return node
 
 
@@ -238,12 +244,17 @@ def owner(units: list[Unit], at: Position | None) -> Unit | None:
 
 
 def declared(units: list[Unit], at: Position) -> Unit | None:
-    """Return the unit whose signature holds at, or that starts later on its line."""
+    """Return the unit whose body starts at, else the innermost whose signature does.
+
+    Istanbul starts a function at its body, and the body of `() => function f() {}`
+    starts where f starts. c8 starts a function at its start, and the signature of
+    `function f(g = function h() {})` holds h.
+    """
     for unit in units:
-        if unit.start <= at <= unit.body:
+        if unit.body == at:
             return unit
-    later = [unit for unit in units if unit.start[0] == at[0] and at < unit.start]
-    return min(later, key=lambda unit: unit.start, default=None)
+    holding = [unit for unit in units if unit.start <= at <= unit.body]
+    return max(holding, key=lambda unit: unit.start, default=None)
 
 
 def statement_hits(entry: dict[str, object], path: str, file: str) -> Iterator[Hit]:
@@ -292,14 +303,11 @@ def tallies(
             found[unit.name].covered_branches += count > 0
     for at, count in function_hits(entry, path, file):
         if at is not None and (unit := declared(units, at)) is not None:
-            found[unit.name].call(at, count)
+            found[unit.name].call(unit, at, count)
     return found
 
 
 def coverage(unit: Unit, tally: Tally, path: str, file: str) -> float:
-    """A function the report says never ran scores 0%, whatever its lines say."""
-    if tally.calls is not None and tally.calls[1] == 0:
-        return 0.0
     if tally.statements or tally.branches:
         return share(
             tally.covered, tally.statements, tally.covered_branches, tally.branches
@@ -311,15 +319,51 @@ def coverage(unit: Unit, tally: Tally, path: str, file: str) -> float:
     )
 
 
+def never_ran(units: list[Unit], found: dict[str, Tally]) -> list[Unit]:
+    """Return each unit the report says never ran.
+
+    Each function inside one also never ran, whatever its own lines say.
+    """
+    silent = [
+        unit for unit in units if (calls := found[unit.name].calls) and not calls[1]
+    ]
+    return [
+        unit
+        for unit in units
+        if any(o.start <= unit.start and unit.end <= o.end for o in silent)
+    ]
+
+
+def relative(name: str) -> str:
+    return Path(os.path.relpath(os.path.abspath(name))).as_posix()
+
+
+def file_scores(path: str, file: str, value: object) -> list[Score]:
+    units = parse(file)
+    entry = as_object(value, path, file)
+    found = tallies(units, entry, path, file)
+    # c8 --all writes `"all": true` for a file the tests never loaded.
+    silent = units if entry.get("all") is True else never_ran(units, found)
+    scores: list[Score] = []
+    for unit in units:
+        if unit in silent:
+            measured = 0.0
+        else:
+            measured = coverage(unit, found[unit.name], path, file)
+        score = crap(unit.complexity, measured)
+        scores.append(Score(file, unit.name, score, unit.complexity, measured))
+    return scores
+
+
 def read_report(path: str, only: Collection[str] = ()) -> list[Score]:
     """Score each function in the report; with only, just those in the files named."""
     document = as_object(load_json(path), path, "the report")
     entries = {
-        Path(os.path.relpath(os.path.abspath(key))).as_posix(): value
+        relative(key): value
         for key, value in document.items()
         if Path(key).suffix.lower() in GRAMMARS
     }
-    wanted = {Path(file).as_posix() for file in only}
+    wanted = {relative(file) for file in only}
     for file in sorted(wanted - set(entries)):
         if Path(file).suffix.lower() in GRAMMARS and parse(file):
             raise InputError(
@@ -327,20 +371,12 @@ def read_report(path: str, only: Collection[str] = ()) -> list[Score]:
                 f"does not measure {file}. Add it to the test tool's coverage, "
                 "or leave it out with the hook's files or exclude",
             )
-    scores: list[Score] = []
-    for file, value in sorted(entries.items()):
-        if wanted and file not in wanted:
-            continue
-        units = parse(file)
-        entry = as_object(value, path, file)
-        found = tallies(units, entry, path, file)
-        for unit in units:
-            # c8 --all writes `"all": true` for a file the tests never loaded.
-            unloaded = entry.get("all") is True
-            measured = 0.0 if unloaded else coverage(unit, found[unit.name], path, file)
-            score = crap(unit.complexity, measured)
-            scores.append(Score(file, unit.name, score, unit.complexity, measured))
-    return scores
+    return [
+        score
+        for file, value in sorted(entries.items())
+        if not wanted or file in wanted
+        for score in file_scores(path, file, value)
+    ]
 
 
 def main(argv: list[str] | None = None) -> int:
