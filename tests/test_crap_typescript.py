@@ -123,7 +123,7 @@ def statement(line, column, hits):
     return {"start": {"line": line, "column": column}}, hits
 
 
-def report_of(root, file, statements=(), functions=(), branches=()):
+def report_of(root, file, statements=(), functions=(), branches=(), **extra):
     """Write an Istanbul report for file with the given statements and functions.
 
     Each branch is (location, arm locations, arm counts).
@@ -137,6 +137,7 @@ def report_of(root, file, statements=(), functions=(), branches=()):
         "b": {str(i): b[2] for i, b in enumerate(branches)},
         "fnMap": {str(i): {"loc": f[0]} for i, f in enumerate(functions)},
         "f": {str(i): f[1] for i, f in enumerate(functions)},
+        **extra,
     }
     report = root / "coverage-final.json"
     report.write_text(json.dumps({str(root / file): entry}))
@@ -230,6 +231,54 @@ def test_report_of_the_wrong_shape_fails(root, document, detail):
     (root / "report.json").write_text(json.dumps(document))
     with pytest.raises(typescript.InputError, match=detail):
         typescript.read_report("report.json")
+
+
+def test_uncalled_arrow_with_a_parenthesized_body_scores_zero(root):
+    # Vitest starts the function inside the parentheses, at x.
+    name = write(root, "a.ts", ONE_LINER)
+    inner = statement(1, 33, 1)
+    report = report_of(root, name, [inner], [(inner[0], 0)])
+    assert rows(typescript.read_report(report)) == [("a.ts", "f", "6.00", 2, "0.0%")]
+
+
+def test_decision_between_functions_counts_where_it_is_made(root):
+    source = """\
+        export function choose(f: boolean): number {
+          const p = f ? function a() { return 1; } : function b() { return 2; };
+          return p();
+        }
+        """
+    name = write(root, "a.ts", source)
+    arms = [{"start": {"line": 2, "column": 16}}, {"start": {"line": 2, "column": 45}}]
+    lines = [
+        statement(2, 2, 1),
+        statement(3, 2, 1),
+        statement(2, 31, 1),
+        statement(2, 60, 0),
+    ]
+    branch = ({"start": {"line": 2, "column": 12}}, arms, [1, 0])
+    report = report_of(root, name, lines, branches=[branch])
+    assert rows(typescript.read_report(report)) == [
+        ("a.ts", "choose", "2.06", 2, "75.0%"),
+        ("a.ts", "choose.a", "1.00", 1, "100.0%"),
+        ("a.ts", "choose.b", "2.00", 1, "0.0%"),
+    ]
+
+
+def test_file_c8_never_loaded_scores_zero(root):
+    source = "export const f = (x: number) => x;\nexport const g = (x: number) => x;\n"
+    empty = {"start": {"line": 1, "column": 0}}
+    report = report_of(
+        root,
+        write(root, "a.ts", source),
+        [statement(1, 0, 0), statement(2, 0, 0)],
+        [(empty, 0)],
+        all=True,
+    )
+    assert rows(typescript.read_report(report)) == [
+        ("a.ts", "f", "2.00", 1, "0.0%"),
+        ("a.ts", "g", "2.00", 1, "0.0%"),
+    ]
 
 
 def test_source_the_report_names_but_that_is_missing_fails(root):

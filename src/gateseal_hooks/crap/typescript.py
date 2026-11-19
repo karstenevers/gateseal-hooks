@@ -165,6 +165,13 @@ def position(lines: list[bytes], point: tuple[int, int]) -> Position:
     return row + 1, len(prefix.decode("utf-8", "replace").encode("utf-16-le")) // 2
 
 
+def unwrapped(node: Node) -> Node:
+    """Istanbul starts `() => (x)`'s body at x, inside the parentheses."""
+    while node.type == "parenthesized_expression" and node.named_children:
+        node = node.named_children[0]
+    return node
+
+
 def units_of(root: Node, lines: list[bytes]) -> list[Unit]:
     """Return each named function in source order, named name#2 when repeated."""
     units: list[Unit] = []
@@ -181,7 +188,7 @@ def units_of(root: Node, lines: list[bytes]) -> list[Unit]:
                 unit = Unit(
                     dotted if seen[dotted] == 1 else f"{dotted}#{seen[dotted]}",
                     position(lines, node.start_point),
-                    position(lines, body.start_point),
+                    position(lines, unwrapped(body).start_point),
                     position(lines, node.end_point),
                 )
                 units.append(unit)
@@ -255,9 +262,11 @@ def branch_hits(entry: dict[str, object], path: str, file: str) -> Iterator[Hit]
         locations = as_list(branch.get("locations"), path, where)
         if len(counts) != len(locations):
             raise InputError(path, f"{where} {key} has {len(counts)} counts")
-        fallback = start_of(branch.get("loc"), path, where)
+        # The arms of `c ? function a() {} : b` start in the functions, but
+        # the decision is made where the branch starts.
+        decision = start_of(branch.get("loc"), path, where)
         for location, count in zip(locations, counts, strict=True):
-            at = start_of(location, path, where) or fallback
+            at = decision or start_of(location, path, where)
             yield at, as_count(count, path, where)
 
 
@@ -323,9 +332,12 @@ def read_report(path: str, only: Collection[str] = ()) -> list[Score]:
         if wanted and file not in wanted:
             continue
         units = parse(file)
-        found = tallies(units, as_object(value, path, file), path, file)
+        entry = as_object(value, path, file)
+        found = tallies(units, entry, path, file)
         for unit in units:
-            measured = coverage(unit, found[unit.name], path, file)
+            # c8 --all writes `"all": true` for a file the tests never loaded.
+            unloaded = entry.get("all") is True
+            measured = 0.0 if unloaded else coverage(unit, found[unit.name], path, file)
             score = crap(unit.complexity, measured)
             scores.append(Score(file, unit.name, score, unit.complexity, measured))
     return scores
