@@ -269,10 +269,13 @@ def parse(file: str) -> list[Unit]:
         source = Path(file).read_bytes()
     except OSError as error:
         raise InputError(file, f"cannot read the source: {error}") from error
-    parsed = source
-    for pattern in UNPARSED:
-        parsed = pattern.sub(blanked, parsed)
-    tree = Parser(GRAMMARS[Path(file).suffix.lower()]).parse(parsed)
+    parser = Parser(GRAMMARS[Path(file).suffix.lower()])
+    tree = parser.parse(source)
+    if tree.root_node.has_error:
+        parsed = source
+        for pattern in UNPARSED:
+            parsed = pattern.sub(blanked, parsed)
+        tree = parser.parse(parsed)
     if tree.root_node.has_error:
         raise InputError(file, "cannot parse the source with tree-sitter")
     return units_of(tree.root_node, source.split(b"\n"))
@@ -406,17 +409,20 @@ def never_ran(
     """Return each unit the report says never ran.
 
     Each function inside one also never ran, whatever its own lines say, as
-    does each function in code the report says never ran, such as c8's
-    `<instance_members_initializer>` for a class no test built.
+    does each function without calls of its own in code the report says never
+    ran, such as c8's `<instance_members_initializer>` for a class no test built.
     """
-    silent = [
-        unit for unit in units if (calls := found[unit.name].calls) and not calls[1]
-    ]
+
+    def calls(unit: Unit) -> int | None:
+        tally = found[unit.name].calls
+        return None if tally is None else tally[1]
+
+    silent = [unit for unit in units if calls(unit) == 0]
     return [
         unit
         for unit in units
         if any(holds(outer, unit.start) for outer in silent)
-        or any(start <= unit.start < end for start, end in idle)
+        or (not calls(unit) and any(start <= unit.start < end for start, end in idle))
     ]
 
 

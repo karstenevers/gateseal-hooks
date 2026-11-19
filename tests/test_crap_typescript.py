@@ -302,6 +302,33 @@ def test_field_function_of_a_class_c8_never_built_scores_zero(root):
     ]
 
 
+def test_method_c8_saw_called_inside_a_never_built_class_keeps_its_calls(root):
+    source = """\
+        export class Widget {
+          a = () => 1;
+          static make(): number {
+            return 1;
+          }
+          b = () => 2;
+        }
+        """
+    hits = [1, 0, 1, 1, 1, 0, 1]
+    lines = [statement(line, 0, hit) for line, hit in enumerate(hits, 1)]
+    initializer = {"start": {"line": 2, "column": 2}, "end": {"line": 6, "column": 14}}
+    calls = [(initializer, 0), (statement(3, 2, 0)[0], 1)]
+    report = report_of(root, write(root, "a.ts", source), lines, calls, c8=True)
+    assert rows(typescript.read_report(report)) == [
+        ("a.ts", "Widget.a", "2.00", 1, "0.0%"),
+        ("a.ts", "Widget.make", "1.00", 1, "100.0%"),
+        ("a.ts", "Widget.b", "2.00", 1, "0.0%"),
+    ]
+
+
+def test_source_the_grammar_parses_is_not_rewritten(root):
+    source = 'const s = "for (await /*";\nconst t = "*/ using x of y";\n'
+    assert typescript.parse(write(root, "a.ts", source)) == []
+
+
 def test_function_inside_one_that_never_ran_scores_zero(root):
     # c8 leaves nested out of fnMap and counts whole lines from column 0.
     source = """\
