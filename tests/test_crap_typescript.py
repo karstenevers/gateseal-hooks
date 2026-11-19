@@ -1,9 +1,10 @@
 """crap-score-typescript on recorded reports and on small sources.
 
 The fixtures hold cases.ts, edges.ts and legacy.js, the tests that ran them
-(cases.test.ts and edges.test.ts), and the coverage that Vitest 5.1.1 with V8
-and with Istanbul recorded for them. The folder fields holds the same for
-fields.ts, recorded with its tsconfig.json. Each expected row is worked out by
+(cases.test.ts and edges.test.ts), and the coverage recorded for them: by
+Vitest 5.1.1 with V8 and with Istanbul, and by Jest 30.5.2 with babel-jest and
+its default coverage provider. The folder fields holds the same for fields.ts,
+recorded by Vitest with its tsconfig.json. Each expected row is worked out by
 hand from the source and its test.
 """
 
@@ -158,10 +159,14 @@ def replaced(exact, other):
 # Istanbul reports a method and an arrow in its name as one function, with the
 # calls of both.
 ISTANBUL = {'tagged.[(() => "k")()]': ("1.00", 1, "100.0%")}
+# Jest reports `using` as it is in the source: 3 of 5 statements, 0 of 2
+# branches.
+JEST = {"dispose": ("4.68", 3, "42.9%")}
 
 
 @pytest.mark.parametrize(
-    ("name", "differs"), [("vitest-v8", V8), ("vitest-istanbul", ISTANBUL)]
+    ("name", "differs"),
+    [("vitest-v8", V8), ("vitest-istanbul", ISTANBUL), ("jest", JEST)],
 )
 def test_recorded_report_scores_every_case(root, name, differs):
     expected = replaced(EXACT, differs)
@@ -301,18 +306,6 @@ def names(spans):
 def test_source_the_grammar_parses_is_not_rewritten(root):
     source = 'const s = "for (await /*";\nconst t = "*/ using x of y";\n'
     assert typescript.parse(write(root, "a.ts", source)) == []
-
-
-def test_exact_positions_as_jest_writes_them_follow_the_same_rule(root):
-    # Vitest never reports a hit where an arrow starts, Jest does: the
-    # statement that creates thunk, then the one that returns the inner arrow.
-    source = "export const thunk = () => () => 1;\n"
-    lines = [statement(1, 21, 1), statement(1, 27, 1), statement(1, 33, 0)]
-    calls = [function(1, 21, 27, 1), function(1, 27, 33, 0)]
-    report = report_of(root, write(root, "a.ts", source), lines, calls)
-    assert rows(typescript.read_report(report)) == [
-        ("a.ts", "thunk", "1.12", 1, "50.0%")
-    ]
 
 
 def test_lines_end_where_ecmascript_ends_them(root):
