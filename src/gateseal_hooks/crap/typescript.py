@@ -58,6 +58,7 @@ NAMESPACES = frozenset({"internal_module", "module"})
 HOLDERS = {
     "variable_declarator": ("value", "name"),
     "pair": ("value", "key"),
+    "object_assignment_pattern": ("right", "left"),
     "public_field_definition": ("value", "name"),
     "field_definition": ("value", "property"),
     "assignment_expression": ("right", "left"),
@@ -91,7 +92,19 @@ SHORT_CIRCUIT = frozenset({"&&", "||", "??", "&&=", "||=", "??="})
 GAP = rb"(?:\s|/\*(?:[^*]|\*(?!/))*\*/|//[^\n]*\n)"
 UNPARSED = (
     re.compile(rb"(?<![\w$.])export" + GAP + rb"+(type)(?=" + GAP + rb"*\*)"),
-    re.compile(rb"(?<![\w$.])for\s*(?:await\s*)?\(\s*((?:await\s+)?using)(?=\s+[\w$])"),
+    re.compile(
+        rb"(?<![\w$.])for"
+        + GAP
+        + rb"*(?:await"
+        + GAP
+        + rb"*)?\("
+        + GAP
+        + rb"*((?:await"
+        + GAP
+        + rb"+)?using)(?="
+        + GAP
+        + rb"+[\w$])"
+    ),
 )
 
 # A line counted from 1 and a column in UTF-16 units, as Istanbul counts them.
@@ -200,6 +213,7 @@ def units_of(root: Node, lines: list[bytes]) -> list[Unit]:
     stack: list[tuple[Node, tuple[str, ...], Unit | None]] = [(root, (), None)]
     while stack:
         node, scope, unit = stack.pop()
+        outer = (scope, unit)
         body = node.child_by_field_name("body") if node.type in FUNCTIONS else None
         if body is not None:
             name = own_name(node, enclosed=unit is not None)
@@ -221,7 +235,13 @@ def units_of(root: Node, lines: list[bytes]) -> list[Unit]:
                 scope = (*scope, named)
             if unit is not None:
                 unit.complexity += decisions(node)
-        stack.extend((child, scope, unit) for child in reversed(node.children))
+        # A computed method name runs where the method is defined.
+        stack.extend(
+            (child, *outer)
+            if child.type == "computed_property_name"
+            else (child, scope, unit)
+            for child in reversed(node.children)
+        )
     return units
 
 

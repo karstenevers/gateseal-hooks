@@ -21,6 +21,7 @@ repos:
       - id: token-budget
         name: file token budget
         entry: uv run --frozen token-budget
+        args: [--]
         language: system
         types: [text]
         require_serial: true
@@ -28,6 +29,7 @@ repos:
       - id: crap-score-python
         name: CRAP score (Python)
         entry: uv run --frozen crap-score-python
+        args: [--]
         language: system
         types: [python]
         files: ^src/

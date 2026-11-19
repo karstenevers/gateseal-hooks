@@ -563,10 +563,31 @@ COMPLEXITY = {
         }
         export async function dispose(items: Disposable[], later: AsyncDisposable[]) {
           for (using item of items) {}
-          for (await using item of later) {}
+          for (await /* each */ using
+            // item
+            item of later) {}
         }
         """,
         {"dispose": 3, "outer": 1, "outer.bound": 2, "outer.cast": 2},
+    ),
+    "a computed method name counts where the method is defined": (
+        "computed.ts",
+        """
+        export function make(on: boolean) {
+          return { [on ? "on" : "off"](): number { return 1; } };
+        }
+        """,
+        {"make": 2, 'make.[on ? "on" : "off"]': 1},
+    ),
+    "a defaulted destructuring binding names its function": (
+        "destructure.ts",
+        """
+        export function make(options: { handle?: (x: number) => number }) {
+          const { handle = (x: number) => (x > 0 ? x : 0) } = options;
+          return handle;
+        }
+        """,
+        {"make": 1, "make.handle": 2},
     ),
 }
 
