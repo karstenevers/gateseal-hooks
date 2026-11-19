@@ -175,8 +175,12 @@ def write(root, name, source):
     return name
 
 
+def at(line, column):
+    return {"start": {"line": line, "column": column}}
+
+
 def statement(line, column, hits):
-    return {"start": {"line": line, "column": column}}, hits
+    return at(line, column), hits
 
 
 def report_of(root, file, statements=(), functions=(), branches=(), **extra):
@@ -259,16 +263,41 @@ def test_exact_positions_as_jest_writes_them_follow_the_same_rule(root):
     # statement that creates thunk, then the one that returns the inner arrow.
     source = "export const thunk = () => () => 1;\n"
     lines = [statement(1, 21, 1), statement(1, 27, 1), statement(1, 33, 0)]
-    calls = [(statement(1, 27, 0)[0], 1), (statement(1, 33, 0)[0], 0)]
+    calls = [(at(1, 27), 1), (at(1, 33), 0)]
     report = report_of(root, write(root, "a.ts", source), lines, calls)
     assert rows(typescript.read_report(report)) == [
         ("a.ts", "thunk", "1.12", 1, "50.0%")
     ]
 
 
+def test_lines_end_where_ecmascript_ends_them(root):
+    # U+2028 and a lone carriage return end a line. The positions are those
+    # that Vitest 5.1.1 recorded for this source.
+    source = (
+        'export const text = "a\u2028b";\n'
+        "export function afterSeparator(x: number) { return x > 0 ? 1 : 2; }\n"
+        "// old\rexport function afterReturn(): void {}\n"
+        "export function last(x: number) { return x; }\n"
+    )
+    (root / "a.ts").write_text(source, newline="")
+    arms = [{"start": {"line": 3, "column": 59}}, {"start": {"line": 3, "column": 63}}]
+    report = report_of(
+        root,
+        "a.ts",
+        [statement(1, 20, 1), statement(3, 44, 1), statement(6, 34, 1)],
+        [(at(3, 42), 1), (at(5, 36), 1), (at(6, 32), 1)],
+        [(at(3, 51), arms, [1, 0])],
+    )
+    assert rows(typescript.read_report(report)) == [
+        ("a.ts", "afterSeparator", "2.15", 2, "66.7%"),
+        ("a.ts", "afterReturn", "1.00", 1, "100.0%"),
+        ("a.ts", "last", "1.00", 1, "100.0%"),
+    ]
+
+
 def test_absolute_file_name_matches_the_report(root):
     name = write(root, "a.ts", "export const f = () => 1;\n")
-    report = report_of(root, name, functions=[(statement(1, 23, 0)[0], 1)])
+    report = report_of(root, name, functions=[(at(1, 23), 1)])
     assert len(typescript.read_report(report, [str(root / name)])) == 1
 
 

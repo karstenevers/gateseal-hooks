@@ -7,8 +7,10 @@ complexity from tree-sitter.
 import os
 import re
 import sys
+from bisect import bisect_right
 from collections.abc import Collection, Iterator
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 import tree_sitter_javascript
@@ -103,6 +105,8 @@ USING_LOOP = re.compile(
     + GAP
     + rb"+[\w$\x80-\xff])"
 )
+# Istanbul ends a line where ECMAScript does, tree-sitter only at a line feed.
+LINE_END = re.compile(rb"\r\n|[\n\r]|\xe2\x80[\xa8\xa9]")
 
 # A line counted from 1 and a column in UTF-16 units, as Istanbul counts them.
 Position = tuple[int, int]
@@ -176,11 +180,11 @@ def decisions(node: Node) -> int:
     return 0
 
 
-def position(lines: list[bytes], point: tuple[int, int]) -> Position:
-    """Turn tree-sitter's byte column into Istanbul's UTF-16 column."""
-    row, column = point
-    prefix = lines[row][:column] if row < len(lines) else b""
-    return row + 1, len(prefix.decode("utf-8", "replace").encode("utf-16-le")) // 2
+def position(source: bytes, starts: list[int], byte: int) -> Position:
+    """Turn a byte offset into Istanbul's line and UTF-16 column."""
+    row = bisect_right(starts, byte) - 1
+    prefix = source[starts[row] : byte].decode("utf-8", "replace")
+    return row + 1, len(prefix.encode("utf-16-le")) // 2
 
 
 def owner(spans: list[Span], at: Position | None) -> Span | None:
@@ -229,8 +233,10 @@ def unit_of(
     return Unit(numbered, line), scope
 
 
-def spans_of(root: Node, lines: list[bytes]) -> list[Span]:
+def spans_of(root: Node, source: bytes) -> list[Span]:
     """Return each function in source order, with each decision counted."""
+    starts = [0, *(match.end() for match in LINE_END.finditer(source))]
+    at = partial(position, source, starts)
     spans: list[Span] = []
     seen: dict[str, int] = {}
     stack: list[tuple[Node, tuple[str, ...]]] = [(root, ())]
@@ -238,14 +244,13 @@ def spans_of(root: Node, lines: list[bytes]) -> list[Span]:
         node, scope = stack.pop()
         code = parameters(node)
         if code is not None:
-            start = position(lines, node.start_point)
+            start = at(node.start_byte)
             unit, scope = unit_of(node, scope, owner(spans, start), seen, start[0])
-            end = position(lines, node.end_point)
-            spans.append(Span(start, position(lines, code.start_point), end, unit))
+            spans.append(Span(start, at(code.start_byte), at(node.end_byte), unit))
         elif holder := scope_name(node):
             scope = (*scope, holder)
         elif decisions(node):
-            inside = owner(spans, position(lines, node.start_point))
+            inside = owner(spans, at(node.start_byte))
             if inside is not None:
                 inside.unit.complexity += 1
         stack.extend((child, scope) for child in reversed(node.children))
@@ -285,7 +290,7 @@ def parse(file: str) -> list[Span]:
     for text in (source, USING_LOOP.sub(blanked, source)):
         root = parser.parse(text).root_node
         if not root.has_error or scorable(root):
-            return spans_of(root, source.split(b"\n"))
+            return spans_of(root, source)
     raise InputError(file, "cannot parse the source with tree-sitter")
 
 
