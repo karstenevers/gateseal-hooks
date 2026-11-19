@@ -313,10 +313,34 @@ def test_branch_without_a_location_counts_its_arms(root):
 
 
 def test_callback_in_a_default_does_not_take_the_function_s_calls(root):
-    source = "export function f(cb = () => 1) { return cb(); }\n"
-    calls = [(statement(1, 32, 0)[0], 1), (statement(1, 29, 0)[0], 0)]
+    source = "export function f(cb = wrap(() => 1)) { return cb; }\n"
+    calls = [(statement(1, 38, 0)[0], 1), (statement(1, 34, 0)[0], 0)]
     report = report_of(root, write(root, "a.ts", source), functions=calls)
     assert rows(typescript.read_report(report)) == [("a.ts", "f", "1.00", 1, "100.0%")]
+
+
+def test_decision_in_a_computed_method_name_counts_around_the_method(root):
+    source = """\
+        export function keyed(flag: boolean) {
+          return { [flag ? "a" : "b"](): number { return 1; } };
+        }
+        """
+    arms = [{"start": {"line": 2, "column": 19}}, {"start": {"line": 2, "column": 25}}]
+    branch = ({"start": {"line": 2, "column": 12}}, arms, [1, 0])
+    lines = [statement(2, 2, 1), statement(2, 42, 0)]
+    calls = [(statement(1, 37, 0)[0], 1), (statement(2, 40, 0)[0], 0)]
+    report = report_of(root, write(root, "a.ts", source), lines, calls, [branch])
+    assert rows(typescript.read_report(report)) == [
+        ("a.ts", "keyed", "2.15", 2, "66.7%"),
+        ("a.ts", 'keyed.[flag ? "a" : "b"]', "2.00", 1, "0.0%"),
+    ]
+
+
+def test_blanked_syntax_keeps_utf16_columns(root):
+    line = "export async function f(xs: AsyncDisposable[]) {"
+    line += " for (await /* é */ using x of xs) {} const g = () => 1; return g; }"
+    units = typescript.parse(write(root, "a.ts", line + "\n"))
+    assert [(u.name, u.start) for u in units][1] == ("f.g", (1, utf16(line, "() =>")))
 
 
 @pytest.mark.parametrize(
@@ -563,12 +587,13 @@ COMPLEXITY = {
         }
         export async function dispose(items: Disposable[], later: AsyncDisposable[]) {
           for (using item of items) {}
+          for (using π of items) {}
           for (await /* each */ using
             // item
             item of later) {}
         }
         """,
-        {"dispose": 3, "outer": 1, "outer.bound": 2, "outer.cast": 2},
+        {"dispose": 4, "outer": 1, "outer.bound": 2, "outer.cast": 2},
     ),
     "a computed method name counts where the method is defined": (
         "computed.ts",
@@ -579,15 +604,27 @@ COMPLEXITY = {
         """,
         {"make": 2, 'make.[on ? "on" : "off"]': 1},
     ),
-    "a defaulted destructuring binding names its function": (
+    "a default value names its function": (
         "destructure.ts",
         """
         export function make(options: { handle?: (x: number) => number }) {
           const { handle = (x: number) => (x > 0 ? x : 0) } = options;
-          return handle;
+          const { use: renamed = () => 1 } = options;
+          const [first = (x: number) => (x ? 1 : 0)] = [];
+          return [handle, renamed, first];
+        }
+        export function given(cb = () => 1, other?: () => void) {
+          return [cb, other];
         }
         """,
-        {"make": 1, "make.handle": 2},
+        {
+            "given": 1,
+            "given.cb": 1,
+            "make": 1,
+            "make.first": 2,
+            "make.handle": 2,
+            "make.renamed": 1,
+        },
     ),
 }
 

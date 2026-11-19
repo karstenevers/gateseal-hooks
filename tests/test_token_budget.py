@@ -176,6 +176,14 @@ def test_budget_of_a_file_removed_from_git_fails(tracked, capsys):
     assert out[0] == NOT_IN_GIT.format("big.md")
 
 
+def test_budget_outside_the_repository_does_not_hide_a_removed_file(tracked, capsys):
+    budgets(tracked, '[budgets]\n"big.md" = 10000\n"../outside.md" = 10000\n')
+    git(tracked, "rm", "-q", "--cached", "big.md")
+    code, out, _ = run(capsys, ".token-budgets.toml")
+    assert code == 1
+    assert out[:2] == [NOT_IN_GIT.format("../outside.md"), NOT_IN_GIT.format("big.md")]
+
+
 def test_budget_of_a_file_in_git_but_not_on_disk_passes(tracked, capsys):
     # A sparse checkout leaves a file in the index but not on disk.
     (tracked / "big.md").unlink()

@@ -120,13 +120,15 @@ def size_findings(
 def in_git(paths: list[str]) -> set[str]:
     """Return the paths in Git's index; outside a repository, those on disk."""
     if not paths:
-        return set()  # git ls-files with no path lists every file
-    command = ["git", "--literal-pathspecs", "ls-files", "-z", "--", *paths]
+        return set()
     try:
-        listed = subprocess.run(command, capture_output=True, check=True).stdout
+        listed = subprocess.run(
+            ["git", "ls-files", "-z"], capture_output=True, check=True
+        )
     except (OSError, subprocess.CalledProcessError):
         return {path for path in paths if Path(path).is_file()}
-    return {Path(os.fsdecode(name)).as_posix() for name in listed.split(b"\0") if name}
+    names = listed.stdout.split(b"\0")
+    return {Path(os.fsdecode(name)).as_posix() for name in names if name} & set(paths)
 
 
 def budget_findings(

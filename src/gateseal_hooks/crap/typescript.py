@@ -59,6 +59,9 @@ HOLDERS = {
     "variable_declarator": ("value", "name"),
     "pair": ("value", "key"),
     "object_assignment_pattern": ("right", "left"),
+    "assignment_pattern": ("right", "left"),
+    "required_parameter": ("value", "pattern"),
+    "optional_parameter": ("value", "pattern"),
     "public_field_definition": ("value", "name"),
     "field_definition": ("value", "property"),
     "assignment_expression": ("right", "left"),
@@ -103,7 +106,7 @@ UNPARSED = (
         + GAP
         + rb"+)?using)(?="
         + GAP
-        + rb"+[\w$])"
+        + rb"+[\w$\x80-\xff])"
     ),
 )
 
@@ -122,6 +125,8 @@ class Unit:
     end: Position
     expression: bool
     complexity: int = 1
+    # A computed method name, which runs where the method is defined.
+    key: tuple[Position, Position] | None = None
 
 
 @dataclass
@@ -206,6 +211,13 @@ def unwrapped(node: Node) -> Node:
     return node
 
 
+def computed_key(node: Node, lines: list[bytes]) -> tuple[Position, Position] | None:
+    key = node.child_by_field_name("name")
+    if key is None or key.type != "computed_property_name":
+        return None
+    return position(lines, key.start_point), position(lines, key.end_point)
+
+
 def units_of(root: Node, lines: list[bytes]) -> list[Unit]:
     """Return each named function in source order, named name#2 when repeated."""
     units: list[Unit] = []
@@ -226,6 +238,7 @@ def units_of(root: Node, lines: list[bytes]) -> list[Unit]:
                     position(lines, unwrapped(body).start_point),
                     position(lines, node.end_point),
                     node.type in EXPRESSIONS,
+                    key=computed_key(node, lines),
                 )
                 units.append(unit)
                 scope = (*scope, name)
@@ -255,9 +268,10 @@ def parse(file: str) -> list[Unit]:
         source = Path(file).read_bytes()
     except OSError as error:
         raise InputError(file, f"cannot read the source: {error}") from error
+    parsed = source
     for pattern in UNPARSED:
-        source = pattern.sub(blanked, source)
-    tree = Parser(GRAMMARS[Path(file).suffix.lower()]).parse(source)
+        parsed = pattern.sub(blanked, parsed)
+    tree = Parser(GRAMMARS[Path(file).suffix.lower()]).parse(parsed)
     if tree.root_node.has_error:
         raise InputError(file, "cannot parse the source with tree-sitter")
     return units_of(tree.root_node, source.split(b"\n"))
@@ -288,14 +302,16 @@ def owner(
     A statement that starts where a function expression starts, such as the
     return in `() => function f() {}`, runs in the code around it.
     """
-    inside = [
-        unit
-        for unit in units
-        if at
-        and unit.start <= at < unit.end
-        and not (statement and unit.expression and at == unit.start)
-    ]
+    inside = [unit for unit in units if at and holds(unit, at, statement)]
     return max(inside, key=lambda unit: unit.start, default=None)
+
+
+def holds(unit: Unit, at: Position, statement: bool = False) -> bool:
+    if not unit.start <= at < unit.end:
+        return False
+    if unit.key is not None and unit.key[0] <= at < unit.key[1]:
+        return False
+    return not (statement and unit.expression and at == unit.start)
 
 
 def declared(units: list[Unit], at: Position, starts: bool) -> tuple[Unit, bool] | None:
@@ -388,11 +404,7 @@ def never_ran(units: list[Unit], found: dict[str, Tally]) -> list[Unit]:
     silent = [
         unit for unit in units if (calls := found[unit.name].calls) and not calls[1]
     ]
-    return [
-        unit
-        for unit in units
-        if any(o.start <= unit.start and unit.end <= o.end for o in silent)
-    ]
+    return [unit for unit in units if any(holds(outer, unit.start) for outer in silent)]
 
 
 def relative(name: str) -> str:

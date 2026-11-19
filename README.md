@@ -80,7 +80,7 @@ npx vitest run --coverage --coverage.reporter=json
 pre-commit run crap-score-typescript --hook-stage manual --all-files
 ```
 
-Complexity is 1 plus each `if`, loop, `catch`, `case`, `? :`, `&&`, `||` and `??` in the function. Optional chaining such as `a?.b` does not count. Each named function is scored on its own: functions, methods, arrow functions in a variable, a class field or an object, and functions nested inside them. A callback without a name counts in the function around it. A function that the report says never ran scores 0%, and so does each function inside it.
+Complexity is 1 plus each `if`, loop, `catch`, `case`, `? :`, `&&`, `||` and `??` in the function. Optional chaining such as `a?.b` does not count. Each named function is scored on its own: functions, methods, arrow functions in a variable, a class field, an object or a default value, and functions nested inside them. A callback without a name counts in the function around it. A function that the report says never ran scores 0%, and so does each function inside it.
 
 The hook fails when a source file does not parse, or when the report has no data for a function. Leave test files out with `exclude`, as they are not in the report. c8 reports work, but count whole lines, so their scores are less exact than those from Vitest or Jest.
 
