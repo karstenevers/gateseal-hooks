@@ -46,6 +46,10 @@ export function keyed(a: boolean, b: boolean) {
   return { [a && b ? "on" : "off"](): number { return 1; } };
 }
 
+export function tagged() {
+  return { [(() => "k")()]() {} };
+}
+
 export class Box {
   handler = (x: number): number => {
     if (x > 0) return 1;

@@ -204,15 +204,21 @@ def owner(spans: list[Span], at: Position | None) -> Span | None:
     return max(inside, key=lambda span: span.start, default=None)
 
 
-def declared(spans: list[Span], start: Position, end: Position) -> Span | None:
-    """Return the function that an Istanbul declaration from start to end names.
+def declared(
+    spans: list[Span], start: Position, end: Position, body: Position | None
+) -> Span | None:
+    """Return the function that an Istanbul function entry names.
 
-    The declaration is the function's name or its first character. Vitest
-    widens it to the nearest places it can map, so it names the first function
-    that it touches between the function's start and its parameters.
+    Its declaration, from start to end, is the function's name or its first
+    character. Vitest widens it to the nearest places it can map, so it can
+    touch more than one function between that function's start and its
+    parameters. The entry names the innermost of these whose code holds the
+    entry's body, else the first.
     """
     touched = [span for span in spans if span.start <= end and start <= span.code]
-    return min(touched, key=lambda span: span.start, default=None)
+    return owner(touched, body) or min(
+        touched, key=lambda span: span.start, default=None
+    )
 
 
 def parameters(node: Node) -> Node | None:
@@ -365,11 +371,12 @@ def tally_calls(
         count = as_count(calls.get(key), path, where)
         start = place(function.get("decl"), path, where)
         end = place(function.get("decl"), path, where, "end")
-        span = declared(spans, start, end) if start and end else None
+        body = place(function.get("loc"), path, where)
+        span = declared(spans, start, end, body) if start and end else None
         if span is None:
             continue
         span.unit.calls = (span.unit.calls or 0) + count
-        if not holds(span, place(function.get("loc"), path, where)):
+        if not holds(span, body):
             span.unit.statements += 1
             span.unit.covered += count > 0
 

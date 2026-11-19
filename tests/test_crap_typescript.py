@@ -82,6 +82,9 @@ EDGES = [
     # The decisions in the method name are keyed's: 1 statement, 3 of 4 branches.
     ("src/edges.ts", "keyed", "3.07", 3, "80.0%"),
     ("src/edges.ts", 'keyed.[a && b ? "on" : "off"]', "2.00", 1, "0.0%"),
+    # The arrow in the method name ran in tagged. The method never ran.
+    ("src/edges.ts", "tagged", "1.00", 1, "100.0%"),
+    ("src/edges.ts", 'tagged.[(() => "k")()]', "2.00", 1, "0.0%"),
     ("src/edges.ts", "Box.handler", "2.26", 2, "60.0%"),
     # Vitest rewrites `using` to a block and a declaration, 2 more statements
     # that did not run: 3 of 7 statements, 0 of 2 branches.
@@ -137,8 +140,13 @@ def replaced(exact, other):
     return [(file, name, *other.get(name, row)) for file, name, *row in exact]
 
 
+# Istanbul reports a method and an arrow in its name as one function, with the
+# calls of both.
+ISTANBUL = {'tagged.[(() => "k")()]': ("1.00", 1, "100.0%")}
+
+
 @pytest.mark.parametrize(
-    ("name", "differs"), [("vitest-v8", V8), ("vitest-istanbul", {})]
+    ("name", "differs"), [("vitest-v8", V8), ("vitest-istanbul", ISTANBUL)]
 )
 def test_recorded_report_scores_every_case(root, name, differs):
     expected = replaced(EXACT, differs)
@@ -161,7 +169,7 @@ def test_main_fails_on_the_cases_over_the_limit(root, capsys):
         "wrapped",
         "jsUntestedBranchy",
     ]
-    assert out[-1] == "59 functions scored, 9 over the limit of 10"
+    assert out[-1] == "61 functions scored, 9 over the limit of 10"
 
 
 def test_named_files_limit_the_scores(root):

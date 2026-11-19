@@ -16,6 +16,7 @@ import {
   passed,
   unpack,
   keyed,
+  tagged,
   Box,
   dispose,
   packed,
@@ -42,6 +43,7 @@ test("edges", async () => {
   const [handle] = unpack({});
   assert.equal(handle(1), 1);
   assert.equal(typeof keyed(true, false), "object");
+  assert.equal(typeof tagged(), "object");
   assert.equal(new Box().handler(0), 2);
   assert.equal(dispose([]), 0);
   assert.equal(packed([]), 1);
