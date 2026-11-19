@@ -231,13 +231,14 @@ def parameters(node: Node) -> Node | None:
 
 
 def body(node: Node) -> Node:
-    """Return the body of a function without the parentheses around it.
+    """Return the body of a function without what is around its value.
 
-    Istanbul ends a function there, before a `)` that closes the body.
+    Istanbul ends a function where that value ends, before a `)` that closes
+    the body and before a type that `as` gives it.
     """
     inner = node.child_by_field_name("body") or node
-    while inner.type == "parenthesized_expression" and inner.named_child_count == 1:
-        inner = inner.named_children[0]
+    while inner.type in TRANSPARENT and inner.type != "type_assertion":
+        inner = next(child for child in inner.named_children if child.type != "comment")
     return inner
 
 

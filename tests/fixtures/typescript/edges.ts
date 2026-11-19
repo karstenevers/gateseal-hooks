@@ -84,5 +84,12 @@ export const shell = () => (
   }
 );
 
+export const noted = () => (
+  // The comment and the type are not part of the value.
+  function quiet(a: boolean, b: boolean) {
+    return a && b ? 1 : 2;
+  }
+) as unknown;
+
 export const split =
   () => (x: number) => (x ? 1 : x ? 2 : 3);

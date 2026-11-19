@@ -103,6 +103,9 @@ EDGES = [
     # test calls only shell, so core never ran.
     ("src/edges.ts", "shell", "1.00", 1, "100.0%"),
     ("src/edges.ts", "shell.core", "12.00", 3, "0.0%"),
+    # The same with a comment before quiet and a type after the parentheses.
+    ("src/edges.ts", "noted", "1.00", 1, "100.0%"),
+    ("src/edges.ts", "noted.quiet", "12.00", 3, "0.0%"),
     # split starts on the line after its name. The test calls only split: 1 of
     # 2 statements, 0 of 4 branches, as for the same arrow on one line.
     ("src/edges.ts", "split", "8.21", 3, "16.7%"),
@@ -193,10 +196,11 @@ def test_main_fails_on_the_cases_over_the_limit(root, capsys):
         "outerWithUncalledCallback",
         "untestedBranchy",
         "wrapped",
+        "noted.quiet",
         "shell.core",
         "jsUntestedBranchy",
     ]
-    assert out[-1] == "64 functions scored, 10 over the limit of 10"
+    assert out[-1] == "66 functions scored, 11 over the limit of 10"
 
 
 def test_named_files_limit_the_scores(root):

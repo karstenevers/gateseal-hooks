@@ -24,6 +24,7 @@ import {
   after,
   split,
   shell,
+  noted,
 } from "./edges.ts";
 
 test("edges", async () => {
@@ -53,4 +54,5 @@ test("edges", async () => {
   assert.equal(after(1), 1);
   assert.equal(typeof split(), "function");
   assert.equal(typeof shell(), "function");
+  assert.equal(typeof noted(), "function");
 });
