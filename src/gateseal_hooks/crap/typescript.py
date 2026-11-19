@@ -209,15 +209,16 @@ def declared(
 ) -> Span | None:
     """Return the function that an Istanbul function entry names.
 
-    The entry runs from start, in the function's declaration, to end, the end
-    of its body. Vitest puts a start that it cannot map on the nearest place
-    before it, which can be on a line before the function. The function has
-    its parameters after start and ends on the line of end. Of several such
-    functions, the entry names the innermost whose code holds the entry's
-    body, else the first.
+    The entry runs from start, in the function's declaration, to end, at or
+    after the function's end on its last line. It names the innermost function
+    in that range whose code holds the entry's body. Vitest puts a place that
+    it cannot map on the nearest place it can. When that puts the body before
+    the function, the entry names the first function with its parameters after
+    start.
     """
-    named = [span for span in spans if start <= span.code and span.end[0] == end[0]]
-    return owner(named, body) or min(named, key=lambda span: span.start, default=None)
+    within = [span for span in spans if end[0] == span.end[0] and span.end <= end]
+    after = [span for span in within if start <= span.code]
+    return owner(within, body) or min(after, key=lambda span: span.start, default=None)
 
 
 def parameters(node: Node) -> Node | None:
@@ -355,14 +356,20 @@ def branch_hits(entry: dict[str, object], path: str, file: str) -> Iterator[Hit]
 
 def tally_calls(
     spans: list[Span], entry: dict[str, object], path: str, file: str
-) -> None:
+) -> dict[Position | None, Position]:
     """Add each function's calls to the unit of the function it declares.
 
     Vitest gives the start of an arrow function no place of its own. When an
     arrow's whole body is such an arrow, Vitest reports the body, and with it
     the arrow's own statement, at a place before the arrow's code. That
     statement ran as often as the arrow.
+
+    When a class sets its fields in its constructor, as with legacy
+    decorators, Vitest reports the statement that makes a field's arrow at the
+    entry's start, in the arrow's parameters. Return each such place with the
+    start of its arrow, where that statement is.
     """
+    made: dict[Position | None, Position] = {}
     where = f"{file} fnMap"
     calls = as_object(entry.get("f"), path, f"{file} f")
     for key, value in as_object(entry.get("fnMap"), path, where).items():
@@ -372,25 +379,28 @@ def tally_calls(
         body = place(function.get("loc"), path, where)
         end = place(function.get("loc"), path, where, "end")
         span = declared(spans, start, end, body) if start and end else None
-        if span is None:
+        if span is None or start is None:
             continue
         span.unit.calls = (span.unit.calls or 0) + count
         if not holds(span, body):
             span.unit.statements += 1
             span.unit.covered += count > 0
+        if holds(span, start) and start != body:
+            made[start] = span.start
+    return made
 
 
 def tally(spans: list[Span], entry: dict[str, object], path: str, file: str) -> None:
     """Count each statement, branch and call of the report in its function's unit."""
+    made = tally_calls(spans, entry, path, file)
     for at, count in statement_hits(entry, path, file):
-        if (span := owner(spans, at)) is not None:
+        if (span := owner(spans, made.get(at, at))) is not None:
             span.unit.statements += 1
             span.unit.covered += count > 0
     for at, count in branch_hits(entry, path, file):
         if (span := owner(spans, at)) is not None:
             span.unit.branches += 1
             span.unit.covered_branches += count > 0
-    tally_calls(spans, entry, path, file)
 
 
 def coverage(unit: Unit) -> float:

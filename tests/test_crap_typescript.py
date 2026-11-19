@@ -2,8 +2,9 @@
 
 The fixtures hold cases.ts, edges.ts and legacy.js, the tests that ran them
 (cases.test.ts and edges.test.ts), and the coverage that Vitest 5.1.1 with V8
-and with Istanbul recorded for them. Each expected row is worked out by hand
-from the source and its test.
+and with Istanbul recorded for them. The folder fields holds the same for
+fields.ts, recorded with its tsconfig.json. Each expected row is worked out by
+hand from the source and its test.
 """
 
 import json
@@ -120,12 +121,13 @@ def root(tmp_path, monkeypatch):
     return tmp_path
 
 
-def recorded(root, name):
-    """Copy the cases to root/src and return the report with absolute paths."""
+def recorded(root, name, folder=FIXTURES):
+    """Copy the sources to root/src and return the report with absolute paths."""
     (root / "src").mkdir()
-    for source in ("cases.ts", "edges.ts", "legacy.js"):
-        shutil.copy(FIXTURES / source, root / "src" / source)
-    document = json.loads((FIXTURES / f"{name}.json").read_text())
+    for source in ("cases.ts", "edges.ts", "legacy.js", "fields.ts"):
+        if (folder / source).exists():
+            shutil.copy(folder / source, root / "src" / source)
+    document = json.loads((folder / f"{name}.json").read_text())
     report = root / "coverage-final.json"
     absolute = {str(root / key): entry for key, entry in document.items()}
     report.write_text(json.dumps(absolute))
@@ -154,6 +156,23 @@ ISTANBUL = {'tagged.[(() => "k")()]': ("1.00", 1, "100.0%")}
 def test_recorded_report_scores_every_case(root, name, differs):
     expected = replaced(EXACT, differs)
     assert rows(typescript.read_report(str(recorded(root, name)))) == expected
+
+
+@pytest.mark.parametrize("name", ["vitest-v8", "vitest-istanbul"])
+def test_class_fields_that_the_constructor_sets_score_as_others(root, name):
+    # With legacy decorators a class sets its fields in its constructor. Vitest
+    # then reports a field's arrow from its first parameter, not from its name.
+    # The test makes a Panel and calls used(1), mapper([1]) and curry(1).
+    report = recorded(root, name, FIXTURES / "fields")
+    assert rows(typescript.read_report(str(report))) == [
+        ("src/fields.ts", "Panel.idle", "12.00", 3, "0.0%"),
+        # Its own statement ran, and 1 of the 4 arms of its 2 conditionals.
+        ("src/fields.ts", "Panel.used", "4.94", 3, "40.0%"),
+        ("src/fields.ts", "Panel.empty", "2.00", 1, "0.0%"),
+        ("src/fields.ts", "Panel.mapper", "1.00", 1, "100.0%"),
+        # The arrow that curry returns never ran: 1 of 2 statements.
+        ("src/fields.ts", "Panel.curry", "1.12", 1, "50.0%"),
+    ]
 
 
 def test_main_fails_on_the_cases_over_the_limit(root, capsys):
@@ -351,16 +370,25 @@ def test_bad_branch_fails(root, branch, detail):
         typescript.read_report(report)
 
 
+NO_CALLS = {"fnMap": {}, "f": {}}
+
+
 @pytest.mark.parametrize(
     ("document", "detail"),
     [
         ([], "the report is not a JSON object"),
         (
-            {"a.ts": {"statementMap": {"0": statement(1, 0, -1)[0]}, "s": {"0": -1}}},
+            {"a.ts": {**NO_CALLS, "statementMap": {"0": at(1, 0)}, "s": {"0": -1}}},
             "statementMap is not a count",
         ),
         (
-            {"a.ts": {"statementMap": {"0": {"start": {"line": 1}}}, "s": {"0": 1}}},
+            {
+                "a.ts": {
+                    **NO_CALLS,
+                    "statementMap": {"0": {"start": {"line": 1}}},
+                    "s": {"0": 1},
+                }
+            },
             "statementMap column is not a count",
         ),
     ],
