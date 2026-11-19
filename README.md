@@ -84,7 +84,7 @@ Complexity is 1 plus each `if`, loop, `catch`, `case`, `? :`, `&&`, `||` and `??
 
 A function's code is its parameters and body. Its name and a computed key count in the code around it. A function that the report says never ran scores 0%.
 
-The hook fails when a source file does not parse, or when the report has no data for a function. Leave test files out with `exclude`, as they are not in the report. c8 reports work, but count whole lines, so their scores are less exact than those from Vitest or Jest.
+The hook fails when a source file does not parse, or when the report has no data for a function. Leave test files out with `exclude`, as they are not in the report. The hook rejects a c8 report, because c8 counts whole lines. With Jest, keep the default coverage provider.
 
 The parsers come from three pinned packages, which pre-commit installs with the hook. Nothing is downloaded when it runs.
 

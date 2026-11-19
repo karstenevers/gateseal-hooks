@@ -1,6 +1,6 @@
 """Fail when a TypeScript or JavaScript function's CRAP score is over the limit.
 
-Coverage comes from an Istanbul JSON report, as Vitest, Jest and c8 write it,
+Coverage comes from an Istanbul JSON report, as Vitest and Jest write it,
 complexity from tree-sitter.
 """
 
@@ -186,22 +186,16 @@ def position(lines: list[bytes], point: tuple[int, int]) -> Position:
     return row + 1, len(prefix.decode("utf-8", "replace").encode("utf-16-le")) // 2
 
 
-def owner(spans: list[Span], at: Position | None, c8: bool = False) -> Span | None:
+def owner(spans: list[Span], at: Position | None) -> Span | None:
     """Return the innermost function whose code holds at.
 
     A function's code is its parameters and its body. Its first character is
     not its code: there the code around it creates the function. Each
     statement, branch, call count and decision belongs to the owner of its start.
-
-    c8 starts a function's code at the function's first character.
     """
     if at is None:
         return None
-    inside = [
-        span
-        for span in spans
-        if (span.start <= at if c8 else span.code <= at != span.start) and at < span.end
-    ]
+    inside = [span for span in spans if span.code <= at < span.end and at != span.start]
     return max(inside, key=lambda span: span.start, default=None)
 
 
@@ -283,23 +277,16 @@ def parse(file: str) -> list[Span]:
     return spans_of(tree.root_node, source.split(b"\n"))
 
 
-def start_of(
-    value: object, path: str, where: str, edge: str = "start"
-) -> Position | None:
-    """Return where an Istanbul location starts or ends, or None for an empty one."""
-    start = as_object(value, path, where).get(edge)
+def start_of(value: object, path: str, where: str) -> Position | None:
+    """Return where an Istanbul location starts, or None for an empty one."""
+    start = as_object(value, path, where).get("start")
     if start is None:
         return None
     start = as_object(start, path, where)
     if start.get("line") is None:
         return None
     line = as_count(start.get("line"), path, f"{where} line")
-    column = start.get("column")
-    if column is None:  # Istanbul writes no column for the end of a line
-        return line, 0 if edge == "start" else sys.maxsize
-    if isinstance(column, bool) or not isinstance(column, int):
-        raise InputError(path, f"{where} column is not a number")
-    return line, max(column, 0)  # c8 writes -1 for the start of a line
+    return line, as_count(start.get("column"), path, f"{where} column")
 
 
 def statement_hits(entry: dict[str, object], path: str, file: str) -> Iterator[Hit]:
@@ -332,70 +319,27 @@ def branch_hits(entry: dict[str, object], path: str, file: str) -> Iterator[Hit]
             yield at, as_count(count, path, where)
 
 
-def function_hits(
-    entry: dict[str, object], path: str, file: str
-) -> Iterator[tuple[Position | None, Position | None, int]]:
-    """Yield where each function's range starts and ends, and its calls."""
+def function_hits(entry: dict[str, object], path: str, file: str) -> Iterator[Hit]:
     where = f"{file} fnMap"
     calls = as_object(entry.get("f"), path, f"{file} f")
     for key, value in as_object(entry.get("fnMap"), path, where).items():
         location = as_object(value, path, where).get("loc")
-        at = start_of(location, path, where)
-        end = start_of(location, path, where, "end")
-        yield at, end, as_count(calls.get(key), path, f"{file} f")
+        yield start_of(location, path, where), as_count(calls.get(key), path, where)
 
 
-def tally(
-    spans: list[Span], entry: dict[str, object], path: str, file: str, c8: bool
-) -> None:
+def tally(spans: list[Span], entry: dict[str, object], path: str, file: str) -> None:
     """Count each statement, branch and call of the report in its owner's unit."""
     for at, count in statement_hits(entry, path, file):
-        if (span := owner(spans, at, c8)) is not None:
+        if (span := owner(spans, at)) is not None:
             span.unit.statements += 1
             span.unit.covered += count > 0
     for at, count in branch_hits(entry, path, file):
-        if (span := owner(spans, at, c8)) is not None:
+        if (span := owner(spans, at)) is not None:
             span.unit.branches += 1
             span.unit.covered_branches += count > 0
-    for at, _, count in function_hits(entry, path, file):
-        if (span := owner(spans, at, c8)) is not None:
+    for at, count in function_hits(entry, path, file):
+        if (span := owner(spans, at)) is not None:
             span.unit.calls = (span.unit.calls or 0) + count
-
-
-def idle_c8(
-    entry: dict[str, object], path: str, file: str
-) -> list[tuple[Position, Position]]:
-    """Return each range that a c8 report says never ran."""
-    return [
-        (at, end)
-        for at, end, count in function_hits(entry, path, file)
-        if at and end and not count
-    ]
-
-
-def within(ranges: list[tuple[Position, Position]], at: Position) -> bool:
-    return any(start <= at < end for start, end in ranges)
-
-
-def never_ran_c8(
-    spans: list[Span], entry: dict[str, object], path: str, file: str
-) -> None:
-    """Set the calls of each function that a c8 report says never ran to 0.
-
-    c8 leaves a function inside one that never ran out of its report. It
-    reports a class that no test built as one range without calls, and a file
-    that no test loaded with `"all": true`.
-    """
-    idle = idle_c8(entry, path, file)
-    own = {id(span.unit): span for span in reversed(spans)}.values()
-    silent = [(span.start, span.end) for span in own if span.unit.calls == 0]
-    for span in own:
-        if (
-            entry.get("all") is True
-            or within(silent, span.start)
-            or (not span.unit.calls and within(idle, span.start))
-        ):
-            span.unit.calls = 0
 
 
 def coverage(unit: Unit, path: str, file: str) -> float:
@@ -418,12 +362,15 @@ def relative(name: str) -> str:
 
 
 def file_scores(path: str, file: str, value: object) -> list[Score]:
-    spans = parse(file)
     entry = as_object(value, path, file)
-    c8 = "all" in entry
-    tally(spans, entry, path, file, c8)
-    if c8:
-        never_ran_c8(spans, entry, path, file)
+    if "all" in entry:
+        raise InputError(
+            path,
+            f"has a c8 entry for {file}. c8 counts whole lines. Use Vitest, "
+            "or Jest with its default coverage provider",
+        )
+    spans = parse(file)
+    tally(spans, entry, path, file)
     scores: list[Score] = []
     # A unit comes once for its function and once for each callback in it.
     for unit in dict.fromkeys(span.unit for span in spans):
