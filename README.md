@@ -4,7 +4,7 @@ Plain [pre-commit](https://pre-commit.com) hooks, usable with or without [gatese
 | --- | --- | --- |
 | `token-budget` | a file is too large to read and review in one piece | at each commit |
 | `crap-score-python` | a Python function is both complex and poorly tested | in CI, after the tests |
-| `crap-score-typescript` | the same, for TypeScript and JavaScript | in CI, after the tests |
+| `crap-score-typescript` | the same, for TypeScript | in CI, after the tests |
 
 ## Use the hooks
 
@@ -65,7 +65,7 @@ coverage json
 pre-commit run crap-score-python --hook-stage manual --all-files
 ```
 
-It scores only the files pre-commit gives it. With `files: ^src/` it skips the tests. To score only the files that a pull request changes, run it with `--from-ref origin/main --to-ref HEAD` in place of `--all-files`. The hook fails when the report does not measure a file it gets. Add the file to coverage.py's `source`, or leave it out with `files` or `exclude`.
+Run coverage.py from the repository root, so the report names files the way pre-commit does. The hook scores only the files pre-commit gives it. With `files: ^src/` it skips the tests. To score only the files that a pull request changes, run it with `--from-ref origin/main --to-ref HEAD` in place of `--all-files`. The hook fails when the report does not measure a file it gets. Add the file to coverage.py's `source`, or leave it out with `files` or `exclude`.
 
 **Options.** `--coverage path.json` reads another report. `--limit 15` sets another limit.
 
@@ -80,9 +80,11 @@ npx vitest run --coverage --coverage.reporter=json
 pre-commit run crap-score-typescript --hook-stage manual --all-files
 ```
 
-It scores every source file it finds, and a function with no coverage scores 0%. It uses line coverage, because its branch mode counted untested functions as covered with c8 reports.
+It scores every `.ts` and `.tsx` file it finds, and a function with no coverage scores 0%. It uses line coverage, because its branch mode counted untested functions as covered with c8 reports.
 
-**Options.** `--threshold 15` sets another limit. `--coverage path.json` reads another report. `--changed-since origin/main` scores only the files a branch changes.
+crap4ts 1.0.1 has known gaps. It does not score a function nested inside another function. A generic arrow function such as `<T>(value: T) => value` in a `.ts` file stops the whole run with an error.
+
+**Options.** `--threshold 15` sets another limit. `--coverage path.json` reads another report.
 
 ## Mutation testing
 

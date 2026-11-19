@@ -16,10 +16,10 @@
   stages: [manual]
 - id: crap-score-typescript
   name: CRAP score (TypeScript)
-  description: Fail when a TypeScript or JavaScript function's CRAP score is over the limit. Runs crap4ts on a coverage report.
+  description: Fail when a TypeScript function's CRAP score is over the limit. Runs crap4ts on a coverage report.
   entry: crap4ts --threshold 10 --no-color
   language: node
   additional_dependencies: [crap4ts@1.0.1, typescript@5.9.3]
   pass_filenames: false
-  types_or: [ts, tsx, javascript, jsx]
+  types_or: [ts, tsx]
   stages: [manual]
