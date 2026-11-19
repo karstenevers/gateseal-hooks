@@ -29,7 +29,7 @@ Homepage = "https://github.com/karstenevers/gateseal-hooks"
 Issues = "https://github.com/karstenevers/gateseal-hooks/issues"
 
 [project.scripts]
-crap-score = "gateseal_hooks.crap_score:main"
+crap-score-python = "gateseal_hooks.crap.python:main"
 token-budget = "gateseal_hooks.token_budget:main"
 
 [dependency-groups]

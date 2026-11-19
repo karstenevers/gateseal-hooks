@@ -46,4 +46,4 @@ jobs:
       - name: Run the repository's hooks on itself
         run: |
           uv run pre-commit run --all-files --show-diff-on-failure
-          uv run pre-commit run crap-score --hook-stage manual --all-files
+          uv run pre-commit run crap-score-python --hook-stage manual --all-files

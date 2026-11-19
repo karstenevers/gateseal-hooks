@@ -3,7 +3,7 @@ Plain [pre-commit](https://pre-commit.com) hooks, usable with or without [gatese
 | Hook | It fails when | Runs |
 | --- | --- | --- |
 | `token-budget` | a file is too large to read and review in one piece | at each commit |
-| `crap-score` | a function is both complex and poorly tested | in CI, after the tests |
+| `crap-score-python` | a Python function is both complex and poorly tested | in CI, after the tests |
 
 ## Use the hooks
 
@@ -15,7 +15,7 @@ repos:
     rev: <commit>
     hooks:
       - id: token-budget
-      - id: crap-score
+      - id: crap-score-python
         files: ^src/
 ```
 
@@ -42,9 +42,11 @@ Record each file it lists in `.token-budgets.toml`, at the next 500 above its si
 
 A file with a budget may not grow past it. When it shrinks by more than 500 tokens, the hook asks you to lower its budget. When it fits the cap, the hook asks you to remove it. Do not add a budget for a new file. Split the file.
 
+A commit checks only the files it changes. Also run the hook on all files in CI, so it catches a removed budget or a file that left Git.
+
 **Options.** `--cap 12000` sets another cap. `--budgets path.toml` reads the budgets from another file.
 
-## crap-score
+## crap-score-python
 
 The CRAP score shows where a change most often breaks something:
 
@@ -54,12 +56,12 @@ CRAP = complexity² × (1 − coverage)³ + complexity
 
 Complexity is 1 plus each `if`, loop, `except`, `match` case, `and`, `or` and conditional in the function. Coverage is the share of its lines and branches that the tests run. A function passes at a score of 10 or less. So a fully tested function may have a complexity of 10, and an untested one a complexity of 2.
 
-The hook reads a coverage.py JSON report, so it does not run at each commit. Run it after the tests, for example in CI:
+The hook reads a JSON report from coverage.py 7.13.1 or later, so it does not run at each commit. Run it after the tests, for example in CI:
 
 ```sh
 coverage run --branch -m pytest
 coverage json
-pre-commit run crap-score --hook-stage manual --all-files
+pre-commit run crap-score-python --hook-stage manual --all-files
 ```
 
 It scores only the files pre-commit gives it. With `files: ^src/` it skips the tests. To score only the files that a pull request changes, run it with `--from-ref origin/main --to-ref HEAD` in place of `--all-files`. The hook fails when the report does not measure a file it gets. Add the file to coverage.py's `source`, or leave it out with `files` or `exclude`.

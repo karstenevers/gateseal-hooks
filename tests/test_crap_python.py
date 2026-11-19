@@ -7,7 +7,7 @@ import textwrap
 
 import pytest
 
-from gateseal_hooks import crap_score as crap
+from gateseal_hooks.crap import python as crap
 
 SCOPE = re.compile(r"(\s*)(?:async\s+)?(def|class)\s+(\w+)")
 FULL = (1, 1, 0, 0)
@@ -98,6 +98,20 @@ def test_score_just_over_the_limit_fails_although_it_prints_as_the_limit(root, c
     code, rows, _ = check(capsys, report)
     assert code == 1
     assert rows == [("m.py", "f", "10.00", "10", "98.9%")]
+
+
+def test_score_equal_to_the_limit_passes_despite_float_error(root, capsys):
+    report = project(root, {"m.py": branchy("f", 5)}, {"f": (3, 5, 0, 0)})
+    code, rows, _ = check(capsys, report, limit="6.6")
+    assert (code, rows) == (0, [])
+
+
+def test_report_without_start_line_names_the_coverage_version(root, capsys):
+    report = project(root, {"m.py": branchy("f", 1)})
+    edit_json(report, lambda report: region_of_f(report).pop("start_line"))
+    code = crap.main(arguments(report))
+    assert code == 1
+    assert "coverage.py 7.13.1+" in capsys.readouterr().err
 
 
 def test_coverage_counts_statements_and_branches(root, capsys):

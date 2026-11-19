@@ -1,7 +1,7 @@
-"""Fail when a function's CRAP score is over the limit.
+"""Fail when a Python function's CRAP score is over the limit.
 
-CRAP = complexity² × (1 − coverage)³ + complexity, per function. Coverage comes
-from coverage.py's JSON report with branch coverage, complexity from `ast`.
+Coverage comes from coverage.py's JSON report with branch coverage, complexity
+from `ast`.
 """
 
 import argparse
@@ -9,9 +9,10 @@ import ast
 import json
 import sys
 from collections.abc import Collection, Iterator
-from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
+
+from gateseal_hooks.crap.score import Score, crap, report
 
 Definition = ast.FunctionDef | ast.AsyncFunctionDef
 
@@ -21,19 +22,6 @@ SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 class InputError(Exception):
     def __init__(self, path: str, detail: str) -> None:
         super().__init__(f"{path}: {detail}")
-
-
-@dataclass(frozen=True)
-class Score:
-    file: str
-    function: str
-    score: float
-    complexity: int
-    coverage: float
-
-
-def crap(complexity: int, coverage: float) -> float:
-    return complexity**2 * (1 - coverage) ** 3 + complexity
 
 
 def decisions(node: ast.AST) -> int:
@@ -199,6 +187,10 @@ def score_file(
             continue
         where = f"{file} function {name}"
         region = as_object(value, report_path, where)
+        if "start_line" not in region:
+            raise InputError(
+                report_path, "has no start_line; make it with coverage.py 7.13.1+"
+            )
         line = as_count(region.get("start_line"), report_path, f"{where} start_line")
         summary = as_object(region.get("summary"), report_path, f"{where} summary")
         found = named.pop(name, [])
@@ -266,28 +258,6 @@ def read_report(path: str, only: Collection[str] = ()) -> list[Score]:
     ]
 
 
-def table(scores: list[Score]) -> list[str]:
-    rows = [("file", "function", "score", "complexity", "coverage")]
-    rows += [
-        (
-            score.file,
-            score.function,
-            f"{score.score:.2f}",
-            str(score.complexity),
-            f"{score.coverage * 100:.1f}%",
-        )
-        for score in scores
-    ]
-    widths = [max(len(row[column]) for row in rows) for column in range(5)]
-    return [
-        "  ".join(
-            cell.rjust(width) if column >= 2 else cell.ljust(width)
-            for column, (cell, width) in enumerate(zip(row, widths, strict=True))
-        )
-        for row in rows
-    ]
-
-
 def arguments(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -300,19 +270,11 @@ def arguments(argv: list[str] | None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     options = arguments(argv)
-    limit = cast(float, options.limit)
     try:
         scores = read_report(
             cast(str, options.coverage), cast(list[str], options.files)
         )
     except InputError as error:
-        print(f"crap-score: {error}", file=sys.stderr)
+        print(f"crap-score-python: {error}", file=sys.stderr)
         return 1
-    over = sorted(
-        (score for score in scores if score.score > limit),
-        key=lambda score: (score.file, score.function),
-    )
-    if over:
-        print("\n".join(table(over)))
-    print(f"{len(scores)} functions scored, {len(over)} over the limit of {limit:g}")
-    return 1 if over else 0
+    return report(scores, cast(float, options.limit))

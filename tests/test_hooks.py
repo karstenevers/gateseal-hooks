@@ -78,7 +78,7 @@ def test_token_budget_runs_when_a_commit_only_deletes_a_budgeted_file(
     assert "big.md: has a budget but is not a file." in result.stdout
 
 
-def test_crap_score_reads_a_real_coverage_report(repository, environment):
+def test_crap_score_python_reads_a_real_coverage_report(repository, environment):
     (repository / "shapes.py").write_text(
         textwrap.dedent(
             """
@@ -112,7 +112,12 @@ def test_crap_score_reads_a_real_coverage_report(repository, environment):
             capture_output=True,
         )
     result = try_hook(
-        repository, environment, "crap-score", "--all-files", "--hook-stage", "manual"
+        repository,
+        environment,
+        "crap-score-python",
+        "--all-files",
+        "--hook-stage",
+        "manual",
     )
     assert result.returncode == 1, result.stdout + result.stderr
     assert "shapes.py  untested  20.00           4      0.0%" in result.stdout

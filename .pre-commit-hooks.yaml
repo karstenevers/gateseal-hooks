@@ -6,10 +6,10 @@
   types: [text]
   require_serial: true
   always_run: true
-- id: crap-score
-  name: CRAP score
-  description: Fail when a function's CRAP score is over the limit. Reads a coverage.py JSON report.
-  entry: crap-score
+- id: crap-score-python
+  name: CRAP score (Python)
+  description: Fail when a Python function's CRAP score is over the limit. Reads a coverage.py JSON report.
+  entry: crap-score-python
   language: python
   types: [python]
   require_serial: true
