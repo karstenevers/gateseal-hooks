@@ -21,7 +21,7 @@ def write(root, name, size):
     return name
 
 
-def budgets(root, text):
+def write_budgets(root, text):
     (root / ".token-budgets.toml").write_text(text)
 
 
@@ -81,13 +81,13 @@ def test_names_like_exempt_files_are_checked(root, capsys, name):
 
 def test_file_within_its_budget_passes(root, capsys):
     name = write(root, "big.md", 48_000)
-    budgets(root, '[budgets]\n"big.md" = 12000\n')
+    write_budgets(root, '[budgets]\n"big.md" = 12000\n')
     assert run(capsys, name) == (0, [], "")
 
 
 def test_file_over_its_budget_fails(root, capsys):
     name = write(root, "big.md", 48_004)
-    budgets(root, '[budgets]\n"big.md" = 12000\n')
+    write_budgets(root, '[budgets]\n"big.md" = 12000\n')
     code, out, _ = run(capsys, name)
     assert code == 1
     assert out[0] == (
@@ -98,7 +98,7 @@ def test_file_over_its_budget_fails(root, capsys):
 
 def test_budget_no_longer_needed_fails(root, capsys):
     name = write(root, "big.md", 36_000)
-    budgets(root, '[budgets]\n"big.md" = 12000\n')
+    write_budgets(root, '[budgets]\n"big.md" = 12000\n')
     code, out, _ = run(capsys, name)
     assert code == 1
     assert out[0] == (
@@ -109,7 +109,7 @@ def test_budget_no_longer_needed_fails(root, capsys):
 
 def test_loose_budget_fails_with_the_fitting_budget(root, capsys):
     name = write(root, "big.md", 40_000)
-    budgets(root, '[budgets]\n"big.md" = 12000\n')
+    write_budgets(root, '[budgets]\n"big.md" = 12000\n')
     code, out, _ = run(capsys, name)
     assert code == 1
     assert out[0] == (
@@ -120,20 +120,20 @@ def test_loose_budget_fails_with_the_fitting_budget(root, capsys):
 
 def test_fitting_budget_passes(root, capsys):
     name = write(root, "big.md", 40_000)
-    budgets(root, '[budgets]\n"big.md" = 10500\n')
+    write_budgets(root, '[budgets]\n"big.md" = 10500\n')
     assert run(capsys, name) == (0, [], "")
 
 
 def test_loose_budget_of_an_unchanged_file_passes(root, capsys):
     write(root, "big.md", 40_000)
     name = write(root, "small.py", 10)
-    budgets(root, '[budgets]\n"big.md" = 12000\n')
+    write_budgets(root, '[budgets]\n"big.md" = 12000\n')
     assert run(capsys, name) == (0, [], "")
 
 
 def test_budget_of_a_missing_file_fails(root, capsys):
     name = write(root, "small.py", 10)
-    budgets(root, '[budgets]\n"gone.md" = 12000\n')
+    write_budgets(root, '[budgets]\n"gone.md" = 12000\n')
     code, out, _ = run(capsys, name)
     assert code == 1
     assert out[0] == NOT_IN_GIT.format("gone.md")
@@ -142,7 +142,7 @@ def test_budget_of_a_missing_file_fails(root, capsys):
 def test_changed_budgets_file_checks_every_budgeted_file(root, capsys):
     write(root, "big.md", 40_000)
     write(root, "loose.md", 40_000)
-    budgets(root, '[budgets]\n"big.md" = 9500\n"loose.md" = 12000\n')
+    write_budgets(root, '[budgets]\n"big.md" = 9500\n"loose.md" = 12000\n')
     code, out, _ = run(capsys, ".token-budgets.toml")
     assert code == 1
     assert out[0] == (
@@ -153,7 +153,7 @@ def test_changed_budgets_file_checks_every_budgeted_file(root, capsys):
 
 
 def test_changed_budgets_file_with_a_missing_file_names_it(root, capsys):
-    budgets(root, '[budgets]\n"gone.md" = 12000\n')
+    write_budgets(root, '[budgets]\n"gone.md" = 12000\n')
     code, out, _ = run(capsys, ".token-budgets.toml")
     assert code == 1
     assert out[0] == NOT_IN_GIT.format("gone.md")
@@ -168,7 +168,7 @@ def tracked(root):
     """A Git repository with big.md and its budget in the index."""
     git(root, "init", "-q")
     write(root, "big.md", 40_000)
-    budgets(root, '[budgets]\n"big.md" = 10000\n')
+    write_budgets(root, '[budgets]\n"big.md" = 10000\n')
     git(root, "add", "big.md", ".token-budgets.toml")
     return root
 
@@ -181,7 +181,7 @@ def test_budget_of_a_file_removed_from_git_fails(tracked, capsys):
 
 
 def test_budget_outside_the_repository_does_not_hide_a_removed_file(tracked, capsys):
-    budgets(tracked, '[budgets]\n"big.md" = 10000\n"../outside.md" = 10000\n')
+    write_budgets(tracked, '[budgets]\n"big.md" = 10000\n"../outside.md" = 10000\n')
     git(tracked, "rm", "-q", "--cached", "big.md")
     code, out, _ = run(capsys, ".token-budgets.toml")
     assert code == 1
@@ -197,20 +197,20 @@ def test_budget_of_a_file_in_git_but_not_on_disk_passes(tracked, capsys):
 def test_budget_of_a_file_with_an_unusual_name_in_git_passes(root, capsys):
     git(root, "init", "-q")
     name = write(root, "big\r\u00e9.md", 40_000)
-    budgets(root, '[budgets]\n"big\\r\u00e9.md" = 10000\n')
+    write_budgets(root, '[budgets]\n"big\\r\u00e9.md" = 10000\n')
     git(root, "add", name, ".token-budgets.toml")
     assert run(capsys, ".token-budgets.toml")[0] == 0
 
 
 def test_budget_key_with_a_leading_dot_slash_applies(root, capsys):
     name = write(root, "big.md", 48_000)
-    budgets(root, '[budgets]\n"./big.md" = 12000\n')
+    write_budgets(root, '[budgets]\n"./big.md" = 12000\n')
     assert run(capsys, name) == (0, [], "")
 
 
 def test_file_argument_with_a_leading_dot_slash_finds_its_budget(root, capsys):
     write(root, "big.md", 48_000)
-    budgets(root, '[budgets]\n"big.md" = 12000\n')
+    write_budgets(root, '[budgets]\n"big.md" = 12000\n')
     assert run(capsys, "./big.md") == (0, [], "")
 
 
@@ -222,7 +222,7 @@ def test_budgets_option_names_the_file(root, capsys):
 
 def test_absolute_budgets_option_matches_the_changed_budgets_file(root, capsys):
     write(root, "big.md", 40_000)
-    budgets(root, '[budgets]\n"big.md" = 9500\n')
+    write_budgets(root, '[budgets]\n"big.md" = 9500\n')
     path = str(root / ".token-budgets.toml")
     assert run(capsys, "--budgets", path, ".token-budgets.toml")[0] == 1
 
@@ -247,7 +247,7 @@ def test_file_name_that_starts_with_a_dash_is_checked(root, capsys):
 )
 def test_bad_budgets_file_fails(root, capsys, text, detail):
     name = write(root, "a.py", 10)
-    budgets(root, text)
+    write_budgets(root, text)
     code, out, err = run(capsys, name)
     assert (code, out) == (1, [])
     assert err.startswith("token-budget: .token-budgets.toml: ")
