@@ -5,6 +5,7 @@ complexity from tree-sitter.
 """
 
 import os
+import re
 import sys
 from collections.abc import Collection, Iterator
 from dataclasses import dataclass
@@ -64,6 +65,8 @@ TRANSPARENT = frozenset(
         "as_expression",
         "satisfies_expression",
         "non_null_expression",
+        "type_assertion",
+        "instantiation_expression",
     }
 )
 CALLS = frozenset({"arguments", "call_expression"})
@@ -80,10 +83,15 @@ DECISIONS = frozenset(
     }
 )
 SHORT_CIRCUIT = frozenset({"&&", "||", "??", "&&=", "||=", "??="})
+# The pinned grammar cannot parse `export type * from`. Blanking `type` keeps
+# every position.
+TYPE_STAR = re.compile(rb"(?<![\w$.])export(\s+)type(?=\s*\*)")
 
 # A line counted from 1 and a column in UTF-16 units, as Istanbul counts them.
 Position = tuple[int, int]
 Hit = tuple[Position | None, int]
+# Where a function starts, whether at its start or else at its body, and its calls.
+Call = tuple[Position | None, bool, int]
 
 
 @dataclass
@@ -103,14 +111,12 @@ class Tally:
     covered_branches: int = 0
     calls: tuple[tuple[bool, Position], int] | None = None
 
-    def call(self, unit: Unit, at: Position, count: int) -> None:
-        """Keep the entry that starts at the unit or its body, else the earliest.
+    def call(self, at: Position, exact: bool, count: int) -> None:
+        """Keep the unit's own entry, else the earliest.
 
-        c8 starts `(a) => (b) => a` at a and at b, which is the outer body.
-        Istanbul starts `function f(g = () => 1) {}` at 1, in f's signature, and
-        at f's body.
+        `function f(g = () => 1) {}` holds the callback's entry in f's signature.
         """
-        rank = (at not in (unit.start, unit.body), at)
+        rank = (not exact, at)
         if self.calls is None or rank < self.calls[0]:
             self.calls = (rank, count)
 
@@ -214,6 +220,7 @@ def parse(file: str) -> list[Unit]:
         source = Path(file).read_bytes()
     except OSError as error:
         raise InputError(file, f"cannot read the source: {error}") from error
+    source = TYPE_STAR.sub(lambda match: b"export" + match[1] + b"    ", source)
     tree = Parser(GRAMMARS[Path(file).suffix.lower()]).parse(source)
     if tree.root_node.has_error:
         raise InputError(file, "cannot parse the source with tree-sitter")
@@ -243,18 +250,17 @@ def owner(units: list[Unit], at: Position | None) -> Unit | None:
     return max(inside, key=lambda unit: unit.start, default=None)
 
 
-def declared(units: list[Unit], at: Position) -> Unit | None:
-    """Return the unit whose body starts at, else the innermost whose signature does.
+def declared(units: list[Unit], at: Position, starts: bool) -> tuple[Unit, bool] | None:
+    """Return the unit whose own entry this is, else the innermost signature holding it.
 
-    Istanbul starts a function at its body, and the body of `() => function f() {}`
-    starts where f starts. c8 starts a function at its start, and the signature of
-    `function f(g = function h() {})` holds h.
+    The signature of `function f(g = function h() {})` holds h.
     """
     for unit in units:
-        if unit.body == at:
-            return unit
+        if at == (unit.start if starts else unit.body):
+            return unit, True
     holding = [unit for unit in units if unit.start <= at <= unit.body]
-    return max(holding, key=lambda unit: unit.start, default=None)
+    inner = max(holding, key=lambda unit: unit.start, default=None)
+    return None if inner is None else (inner, False)
 
 
 def statement_hits(entry: dict[str, object], path: str, file: str) -> Iterator[Hit]:
@@ -281,12 +287,19 @@ def branch_hits(entry: dict[str, object], path: str, file: str) -> Iterator[Hit]
             yield at, as_count(count, path, where)
 
 
-def function_hits(entry: dict[str, object], path: str, file: str) -> Iterator[Hit]:
+def function_hits(entry: dict[str, object], path: str, file: str) -> Iterator[Call]:
+    """Istanbul starts a function at its body and its decl at its name.
+
+    c8 starts both at the function's start, so `() => function f() {}`'s body and
+    f start at the same place.
+    """
     where = f"{file} fnMap"
     calls = as_object(entry.get("f"), path, f"{file} f")
     for key, value in as_object(entry.get("fnMap"), path, where).items():
-        at = start_of(as_object(value, path, where).get("loc"), path, where)
-        yield at, as_count(calls.get(key), path, f"{file} f")
+        function = as_object(value, path, where)
+        at = start_of(function.get("loc"), path, where)
+        starts = at == start_of(function.get("decl", {}), path, where)
+        yield at, starts, as_count(calls.get(key), path, f"{file} f")
 
 
 def tallies(
@@ -301,9 +314,9 @@ def tallies(
         if (unit := owner(units, at)) is not None:
             found[unit.name].branches += 1
             found[unit.name].covered_branches += count > 0
-    for at, count in function_hits(entry, path, file):
-        if at is not None and (unit := declared(units, at)) is not None:
-            found[unit.name].call(unit, at, count)
+    for at, starts, count in function_hits(entry, path, file):
+        if at is not None and (match := declared(units, at, starts)) is not None:
+            found[match[0].name].call(at, match[1], count)
     return found
 
 

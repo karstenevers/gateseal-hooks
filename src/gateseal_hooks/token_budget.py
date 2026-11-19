@@ -27,6 +27,7 @@ LOCKFILES = frozenset(
         "Podfile.lock",
         "bun.lock",
         "composer.lock",
+        "deno.lock",
         "flake.lock",
         "go.sum",
         "gradle.lockfile",
@@ -116,14 +117,14 @@ def size_findings(
 
 
 def in_git(paths: list[str]) -> set[str]:
-    """Return the paths in Git's index; outside a repository, every path."""
+    """Return the paths in Git's index; outside a repository, those on disk."""
     if not paths:
         return set()  # git ls-files with no path lists every file
     command = ["git", "--literal-pathspecs", "ls-files", "-z", "--", *paths]
     try:
         listed = subprocess.run(command, capture_output=True, check=True, text=True)
     except (OSError, subprocess.CalledProcessError):
-        return set(paths)
+        return {path for path in paths if Path(path).is_file()}
     return {Path(name).as_posix() for name in listed.stdout.split("\0") if name}
 
 
@@ -133,7 +134,8 @@ def budget_findings(
     checked = set(paths)
     tracked = in_git(sorted(budgets))
     for path, budget in sorted(budgets.items()):
-        if path not in tracked or not Path(path).is_file():
+        # A sparse checkout leaves a file in the index but not on disk.
+        if path not in tracked:
             yield f"{path}: has a budget but is not a file in Git. Rename or remove it."
             continue
         if path not in checked:

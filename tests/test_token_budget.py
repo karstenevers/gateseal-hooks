@@ -53,7 +53,14 @@ def test_cap_option(root, capsys):
 
 @pytest.mark.parametrize(
     "name",
-    ["uv.lock", "web/package-lock.json", "CHANGELOG.md", "docs/NEWS", "History.rst"],
+    [
+        "uv.lock",
+        "deno.lock",
+        "web/package-lock.json",
+        "CHANGELOG.md",
+        "docs/NEWS",
+        "History.rst",
+    ],
 )
 def test_lockfiles_and_changelogs_are_exempt(root, capsys, name):
     write(root, name, 100_000)
@@ -148,19 +155,31 @@ def test_changed_budgets_file_with_a_missing_file_names_it(root, capsys):
     assert out[0] == NOT_IN_GIT.format("gone.md")
 
 
-def test_budget_of_a_file_removed_from_git_fails(root, capsys):
-    def git(*args):
-        subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+def git(root, *args):
+    subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
 
-    git("init", "-q")
+
+@pytest.fixture
+def tracked(root):
+    """A Git repository with big.md and its budget in the index."""
+    git(root, "init", "-q")
     write(root, "big.md", 40_000)
     budgets(root, '[budgets]\n"big.md" = 10000\n')
-    git("add", "big.md", ".token-budgets.toml")
-    assert run(capsys, ".token-budgets.toml")[0] == 0
-    git("rm", "-q", "--cached", "big.md")
+    git(root, "add", "big.md", ".token-budgets.toml")
+    return root
+
+
+def test_budget_of_a_file_removed_from_git_fails(tracked, capsys):
+    git(tracked, "rm", "-q", "--cached", "big.md")
     code, out, _ = run(capsys, ".token-budgets.toml")
     assert code == 1
     assert out[0] == NOT_IN_GIT.format("big.md")
+
+
+def test_budget_of_a_file_in_git_but_not_on_disk_passes(tracked, capsys):
+    # A sparse checkout leaves a file in the index but not on disk.
+    (tracked / "big.md").unlink()
+    assert run(capsys, ".token-budgets.toml")[0] == 0
 
 
 def test_budget_key_with_a_leading_dot_slash_applies(root, capsys):

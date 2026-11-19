@@ -123,10 +123,11 @@ def statement(line, column, hits):
     return {"start": {"line": line, "column": column}}, hits
 
 
-def report_of(root, file, statements=(), functions=(), branches=(), **extra):
+def report_of(root, file, statements=(), functions=(), branches=(), c8=False, **extra):
     """Write an Istanbul report for file with the given statements and functions.
 
-    Each branch is (location, arm locations, arm counts).
+    Each branch is (location, arm locations, arm counts). c8 writes each
+    function's decl the same as its loc.
     """
     entry = {
         "statementMap": {str(i): s[0] for i, s in enumerate(statements)},
@@ -135,7 +136,10 @@ def report_of(root, file, statements=(), functions=(), branches=(), **extra):
             str(i): {"loc": b[0], "locations": b[1]} for i, b in enumerate(branches)
         },
         "b": {str(i): b[2] for i, b in enumerate(branches)},
-        "fnMap": {str(i): {"loc": f[0]} for i, f in enumerate(functions)},
+        "fnMap": {
+            str(i): {"loc": f[0], **({"decl": f[0]} if c8 else {})}
+            for i, f in enumerate(functions)
+        },
         "f": {str(i): f[1] for i, f in enumerate(functions)},
         **extra,
     }
@@ -197,7 +201,9 @@ def test_function_in_a_default_gets_its_own_calls(root, outer, inner):
         return {"start": {"line": line, "column": column}}
 
     calls = [(at(*outer), 1), (at(*inner), 1)]
-    report = report_of(root, write(root, "a.ts", DEFAULT), [statement(1, 50, 1)], calls)
+    name = write(root, "a.ts", DEFAULT)
+    c8 = outer == (1, 7)
+    report = report_of(root, name, [statement(1, 50, 1)], calls, c8=c8)
     assert rows(typescript.read_report(report)) == [
         ("a.ts", "outer", "1.00", 1, "100.0%"),
         ("a.ts", "outer.inner", "1.00", 1, "100.0%"),
@@ -212,6 +218,21 @@ def test_arrow_whose_body_is_a_function_keeps_its_own_calls(root):
     assert rows(typescript.read_report(report)) == [
         ("a.ts", "make", "1.00", 1, "100.0%"),
         ("a.ts", "make.made", "2.00", 1, "0.0%"),
+    ]
+
+
+def test_c8_entry_where_a_function_starts_an_arrow_body_is_its_own(root):
+    source = """\
+        export const factory = () => function handler(x: number): number {
+          return x > 0 ? 1 : 2;
+        };
+        """
+    lines = [statement(line, 0, 1) for line in (1, 2, 3)]
+    calls = [(statement(1, 23, 0)[0], 1), (statement(1, 29, 0)[0], 0)]
+    report = report_of(root, write(root, "a.ts", source), lines, calls, c8=True)
+    assert rows(typescript.read_report(report)) == [
+        ("a.ts", "factory", "1.00", 1, "100.0%"),
+        ("a.ts", "factory.handler", "6.00", 2, "0.0%"),
     ]
 
 
@@ -481,6 +502,19 @@ COMPLEXITY = {
         }
         """,
         {"outer": 2, "outer.inner": 2},
+    ),
+    "type-only star exports, type assertions and instantiations": (
+        "types.ts",
+        """
+        export type * from "./shapes";
+        export type * as Shapes from "./shapes";
+        export function outer() {
+          const cast = <Handler>((n: number) => (n > 0 ? n : 0));
+          const bound = (<T,>(x: T) => (x ? x : null))<number>;
+          return [cast, bound];
+        }
+        """,
+        {"outer": 1, "outer.bound": 2, "outer.cast": 2},
     ),
 }
 
