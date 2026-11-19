@@ -57,7 +57,7 @@ The CRAP score shows where a change most often breaks something:
 CRAP = complexity² × (1 − coverage)³ + complexity
 ```
 
-Complexity is 1 plus each `if`, loop, `except`, `match` case, `and`, `or` and conditional in the function. Coverage is the share of its lines and branches that the tests run. A function passes at a score of 10 or less. So a fully tested function may have a complexity of 10, and an untested one a complexity of 2.
+Complexity is 1 plus each `if`, loop, `except`, `match` case, `and`, `or` and conditional in the function. Coverage is the share of its lines and branches that the tests run. A branch that `# pragma: no branch` waives counts as covered when its line ran. A function passes at a score of 10 or less. So a fully tested function may have a complexity of 10, and an untested one a complexity of 2.
 
 The hook reads a JSON report from coverage.py 7.13.1 or later, so it does not run at each commit. Run it after the tests, for example in CI:
 

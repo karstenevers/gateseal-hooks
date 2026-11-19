@@ -14,14 +14,14 @@ FULL = (1, 1, 0, 0)
 
 
 def region(line, covered, statements, covered_branches, branches):
+    """Return a region with these counts of lines and branches, 2 branches a line."""
+    arcs = [[number // 2 + 1, number + 2] for number in range(branches)]
     return {
         "start_line": line,
-        "summary": {
-            "covered_lines": covered,
-            "num_statements": statements,
-            "covered_branches": covered_branches,
-            "num_branches": branches,
-        },
+        "executed_lines": list(range(1, covered + 1)),
+        "missing_lines": list(range(covered + 1, statements + 1)),
+        "executed_branches": arcs[:covered_branches],
+        "missing_branches": arcs[covered_branches:],
     }
 
 
@@ -181,12 +181,6 @@ BAD_INPUT = {
     ),
     "region without def": (
         report_edit(lambda report: region_of_f(report).update(start_line=2)),
-        "coverage.json",
-    ),
-    "covers more than it has": (
-        report_edit(
-            lambda report: region_of_f(report)["summary"].update(covered_lines=2)
-        ),
         "coverage.json",
     ),
     "def without region": (
@@ -396,6 +390,13 @@ FIXTURE = {
             return 0
 
 
+        def guard(flag, count):
+            if flag:
+                while count:  # pragma: no branch
+                    count -= 1
+            return count
+
+
         class Box:
             @property
             def size(self):
@@ -416,6 +417,17 @@ FIXTURE = {
             @limit.setter
             def limit(self, value):
                 self._size = value
+
+            @property
+            def spare(self):
+                if self._size > 5:
+                    while self._size:  # pragma: no branch
+                        self._size -= 1
+                return self._size
+
+            @spare.setter
+            def spare(self, value):
+                self._size = value
         """,
     "pkg/unused.py": """
         def lonely(x):
@@ -429,7 +441,7 @@ FIXTURE = {
                         item -= 1
         """,
     "drive.py": """
-        from pkg.used import Box, Shape, outer
+        from pkg.used import Box, Shape, guard, outer
 
         for kind in ("triangle", "square", "circle"):
             Shape(kind).sides()
@@ -439,6 +451,9 @@ FIXTURE = {
         assert box.size == 3
         box.limit = 9
         assert box.limit == 5
+        box.spare = 2
+        assert box.spare == 2
+        assert guard(False, 0) == 0
         """,
 }
 
@@ -487,6 +502,11 @@ def test_real_report_scores_every_function(measured, monkeypatch):
         # 2 of 3 lines ran. The pragma waives the branch that did not run.
         ("pkg/used.py", "Box.limit"): (2.03, 2, 0.8),
         ("pkg/used.py", "Box.limit#2"): (1.0, 1, 1.0),
+        # 2 of 4 lines and 1 of 2 branches ran. The line with the pragma did
+        # not run, thus its branches do not count. A shared name changes nothing.
+        ("pkg/used.py", "guard"): (4.12, 3, 0.5),
+        ("pkg/used.py", "Box.spare"): (4.12, 3, 0.5),
+        ("pkg/used.py", "Box.spare#2"): (1.0, 1, 1.0),
         ("pkg/unused.py", "lonely"): (6.0, 2, 0.0),
         ("pkg/unused.py", "Ghost.haunt"): (12.0, 3, 0.0),
     }
@@ -500,7 +520,7 @@ def test_real_report_fails_on_untested_functions(measured, monkeypatch, capsys):
         ("pkg/unused.py", "Ghost.haunt", "12.00", "3", "0.0%"),
         ("pkg/used.py", "idle", "12.00", "3", "0.0%"),
     ]
-    assert summary == "13 functions scored, 2 over the limit of 10"
+    assert summary == "16 functions scored, 2 over the limit of 10"
 
 
 def test_defaults_read_coverage_json_with_a_limit_of_10(root, capsys):

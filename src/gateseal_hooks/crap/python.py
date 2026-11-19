@@ -122,24 +122,31 @@ def branch_sources(value: object, path: str, where: str) -> list[int]:
 
 
 def lines_coverage(
-    entry: dict[str, object], lines: set[int], path: str, file: str
+    entry: dict[str, object], lines: set[int] | None, path: str, where: str
 ) -> float:
-    """Return the share of lines' statements and branches that the file's data ran."""
+    """Return the share of the entry's statements and branches that ran.
+
+    The entry is a file or a region of coverage.py. With lines, only what is
+    on these lines counts.
+    """
     executed, missing = (
         {
-            as_count(line, path, f"{file} {name}")
-            for line in as_list(entry.get(name), path, f"{file} {name}")
+            as_count(line, path, f"{where} {name}")
+            for line in as_list(entry.get(name), path, f"{where} {name}")
         }
         for name in ("executed_lines", "missing_lines")
     )
     hit, missed = (
-        branch_sources(entry.get(name), path, f"{file} {name}")
+        branch_sources(entry.get(name), path, f"{where} {name}")
         for name in ("executed_branches", "missing_branches")
     )
+    if lines is None:
+        lines = executed | missing | set(hit + missed)
     taken = [line for line in hit if line in lines]
     listed = taken + [line for line in missed if line in lines]
     # A line that branches has 2 branches or more. coverage.py lists only one
-    # when `# pragma: no branch` waives the other, and counts that one as covered.
+    # when `# pragma: no branch` waives the other, and that one counts as
+    # covered. It lists none for such a line that never ran.
     waived = sum(listed.count(line) == 1 for line in set(listed))
     return share(
         len(executed & lines),
@@ -147,21 +154,6 @@ def lines_coverage(
         len(taken) + waived,
         len(listed) + waived,
     )
-
-
-def region_coverage(summary: dict[str, object], path: str, where: str) -> float:
-    covered, statements, covered_branches, branches = (
-        as_count(summary.get(name), path, f"{where} {name}")
-        for name in (
-            "covered_lines",
-            "num_statements",
-            "covered_branches",
-            "num_branches",
-        )
-    )
-    if covered > statements or covered_branches > branches:
-        raise InputError(path, f"{where} covers more than it has")
-    return share(covered, statements, covered_branches, branches)
 
 
 def score_file(
@@ -179,13 +171,12 @@ def score_file(
                 report_path, "has no start_line; make it with coverage.py 7.13.1+"
             )
         line = as_count(region.get("start_line"), report_path, f"{where} start_line")
-        summary = as_object(region.get("summary"), report_path, f"{where} summary")
         found = named.pop(name, [])
         if line not in {node.lineno for node in found}:
             raise InputError(
                 report_path, f"{where} starts on line {line}, not a def of that name"
             )
-        yield from name_scores(file, name, found, line, entry, summary, report_path)
+        yield from name_scores(file, name, found, line, entry, region, report_path)
     if named:
         name, found = min(named.items(), key=lambda item: item[1][0].lineno)
         raise InputError(
@@ -199,17 +190,17 @@ def name_scores(
     found: list[Definition],
     line: int,
     entry: dict[str, object],
-    summary: dict[str, object],
+    region: dict[str, object],
     report_path: str,
 ) -> Iterator[Score]:
     """Score the defs that share name; later ones are named name#2, name#3.
 
-    coverage.py reports one region per name, for the def that starts on line,
-    so another def of that name, such as a property's getter beside its
-    setter, is measured from the file's lines instead.
+    coverage.py reports one region per name, for the def that starts on line.
+    Another def of that name, such as a property's getter beside its setter,
+    is measured the same way from the file's lines.
     """
     shares = [
-        region_coverage(summary, report_path, f"{file} function {name}")
+        lines_coverage(region, None, report_path, f"{file} function {name}")
         if node.lineno == line
         else lines_coverage(entry, own_lines(node), report_path, file)
         for node in found
