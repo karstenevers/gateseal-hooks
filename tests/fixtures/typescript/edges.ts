@@ -69,6 +69,7 @@ export function idle(): number {
 export function packed(items: number[]): number { items.map(n => n + 1); const inner = () => 1; return inner(); }
 
 export function noop(): void {}
+export enum Mode { On, Off }
 export function unused(): void {}
 
 export const wide = "😀😀😀😀😀😀😀😀😀😀"; export const after = (x: number) => x;

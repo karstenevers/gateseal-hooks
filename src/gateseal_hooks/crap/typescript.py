@@ -186,17 +186,33 @@ def position(source: bytes, starts: list[int], byte: int) -> Position:
     return row + 1, len(prefix.encode("utf-16-le")) // 2
 
 
+def holds(span: Span, at: Position | None) -> bool:
+    """Return whether at is in the function's code.
+
+    A function's code is its parameters and its body. Its first character is
+    not its code: there the code around it creates the function.
+    """
+    return at is not None and span.code <= at < span.end and at != span.start
+
+
 def owner(spans: list[Span], at: Position | None) -> Span | None:
     """Return the innermost function whose code holds at.
 
-    A function's code is its parameters and its body. Its first character is
-    not its code: there the code around it creates the function. Each
-    statement, branch, call count and decision belongs to the owner of its start.
+    Each statement, branch and decision belongs to the owner of its start.
     """
-    if at is None:
-        return None
-    inside = [span for span in spans if span.code <= at < span.end and at != span.start]
+    inside = [span for span in spans if holds(span, at)]
     return max(inside, key=lambda span: span.start, default=None)
+
+
+def declared(spans: list[Span], start: Position, end: Position) -> Span | None:
+    """Return the function that an Istanbul declaration from start to end names.
+
+    The declaration is the function's name or its first character. Vitest
+    widens it to the nearest places it can map, so it names the first function
+    that it touches between the function's start and its parameters.
+    """
+    touched = [span for span in spans if span.start <= end and start <= span.code]
+    return min(touched, key=lambda span: span.start, default=None)
 
 
 def parameters(node: Node) -> Node | None:
@@ -289,23 +305,25 @@ def parse(file: str) -> list[Span]:
     raise InputError(file, "cannot parse the source with tree-sitter")
 
 
-def start_of(value: object, path: str, where: str) -> Position | None:
-    """Return where an Istanbul location starts, or None for an empty one."""
-    start = as_object(value, path, where).get("start")
-    if start is None:
+def place(value: object, path: str, where: str, edge: str = "start") -> Position | None:
+    """Return where an Istanbul location starts or ends, or None for an empty one."""
+    point = as_object(value, path, where).get(edge)
+    if point is None:
         return None
-    start = as_object(start, path, where)
-    if start.get("line") is None:
+    point = as_object(point, path, where)
+    if point.get("line") is None:
         return None
-    line = as_count(start.get("line"), path, f"{where} line")
-    return line, as_count(start.get("column"), path, f"{where} column")
+    line = as_count(point.get("line"), path, f"{where} line")
+    if edge == "end" and point.get("column") is None:
+        return line, sys.maxsize  # Istanbul writes no column for the end of a line
+    return line, as_count(point.get("column"), path, f"{where} column")
 
 
 def statement_hits(entry: dict[str, object], path: str, file: str) -> Iterator[Hit]:
     where = f"{file} statementMap"
     hits = as_object(entry.get("s"), path, f"{file} s")
     for key, location in as_object(entry.get("statementMap"), path, where).items():
-        yield start_of(location, path, where), as_count(hits.get(key), path, where)
+        yield place(location, path, where), as_count(hits.get(key), path, where)
 
 
 def branch_hits(entry: dict[str, object], path: str, file: str) -> Iterator[Hit]:
@@ -323,24 +341,41 @@ def branch_hits(entry: dict[str, object], path: str, file: str) -> Iterator[Hit]
         if len(counts) != len(locations):
             raise InputError(path, f"{where} {key} has {len(counts)} counts")
         starts = (
-            start_of(location, path, where)
-            for location in (branch.get("loc"), *locations)
+            place(location, path, where) for location in (branch.get("loc"), *locations)
         )
         at = next((start for start in starts if start), None)
         for count in counts:
             yield at, as_count(count, path, where)
 
 
-def function_hits(entry: dict[str, object], path: str, file: str) -> Iterator[Hit]:
+def tally_calls(
+    spans: list[Span], entry: dict[str, object], path: str, file: str
+) -> None:
+    """Add each function's calls to the unit of the function it declares.
+
+    Vitest gives the start of an arrow function no place of its own. When an
+    arrow's whole body is such an arrow, Vitest reports the body, and with it
+    the arrow's own statement, at a place before the arrow's code. That
+    statement ran as often as the arrow.
+    """
     where = f"{file} fnMap"
     calls = as_object(entry.get("f"), path, f"{file} f")
     for key, value in as_object(entry.get("fnMap"), path, where).items():
-        location = as_object(value, path, where).get("loc")
-        yield start_of(location, path, where), as_count(calls.get(key), path, where)
+        function = as_object(value, path, where)
+        count = as_count(calls.get(key), path, where)
+        start = place(function.get("decl"), path, where)
+        end = place(function.get("decl"), path, where, "end")
+        span = declared(spans, start, end) if start and end else None
+        if span is None:
+            continue
+        span.unit.calls = (span.unit.calls or 0) + count
+        if not holds(span, place(function.get("loc"), path, where)):
+            span.unit.statements += 1
+            span.unit.covered += count > 0
 
 
 def tally(spans: list[Span], entry: dict[str, object], path: str, file: str) -> None:
-    """Count each statement, branch and call of the report in its owner's unit."""
+    """Count each statement, branch and call of the report in its function's unit."""
     for at, count in statement_hits(entry, path, file):
         if (span := owner(spans, at)) is not None:
             span.unit.statements += 1
@@ -349,9 +384,7 @@ def tally(spans: list[Span], entry: dict[str, object], path: str, file: str) -> 
         if (span := owner(spans, at)) is not None:
             span.unit.branches += 1
             span.unit.covered_branches += count > 0
-    for at, count in function_hits(entry, path, file):
-        if (span := owner(spans, at)) is not None:
-            span.unit.calls = (span.unit.calls or 0) + count
+    tally_calls(spans, entry, path, file)
 
 
 def coverage(unit: Unit) -> float:

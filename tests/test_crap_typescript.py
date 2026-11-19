@@ -63,11 +63,11 @@ EDGES = [
     ("src/edges.ts", "choose.right", "2.00", 1, "0.0%"),
     # The inner arrow has no name, so its statement and branches are curried's.
     ("src/edges.ts", "curried", "3.69", 2, "25.0%"),
-    # thunk ran, but Vitest reports its call and its own statement at the
-    # variable name, outside the function. Only the inner statement is left.
-    ("src/edges.ts", "thunk", "2.00", 1, "0.0%"),
-    # hollow ran too. With an empty inner arrow, nothing is left in its code.
-    ("src/edges.ts", "hollow", "2.00", 1, "0.0%"),
+    # Vitest reports the call and the own statement of thunk and of hollow at
+    # the variable name, outside the function. The statement counts from the
+    # call: 1 of 2 with the inner statement of thunk, 1 of 1 for hollow.
+    ("src/edges.ts", "thunk", "1.12", 1, "50.0%"),
+    ("src/edges.ts", "hollow", "1.00", 1, "100.0%"),
     ("src/edges.ts", "pass", "2.00", 1, "0.0%"),
     ("src/edges.ts", "named", "1.00", 1, "100.0%"),
     ("src/edges.ts", "named.inner", "1.00", 1, "100.0%"),
@@ -185,10 +185,17 @@ def statement(line, column, hits):
     return at(line, column), hits
 
 
+def function(line, start, end, body, calls):
+    """Return a function declared from start to end, with its body's column."""
+    declared = {**at(line, start), "end": {"line": line, "column": end}}
+    return declared, at(line, body), calls
+
+
 def report_of(root, file, statements=(), functions=(), branches=(), **extra):
     """Write an Istanbul report for file with the given statements and functions.
 
-    Each branch is (location, arm locations, arm counts).
+    Each function is (declaration, body, calls) and each branch is (location,
+    arm locations, arm counts).
     """
     entry = {
         "statementMap": {str(i): s[0] for i, s in enumerate(statements)},
@@ -197,8 +204,8 @@ def report_of(root, file, statements=(), functions=(), branches=(), **extra):
             str(i): {"loc": b[0], "locations": b[1]} for i, b in enumerate(branches)
         },
         "b": {str(i): b[2] for i, b in enumerate(branches)},
-        "fnMap": {str(i): {"loc": f[0]} for i, f in enumerate(functions)},
-        "f": {str(i): f[1] for i, f in enumerate(functions)},
+        "fnMap": {str(i): {"decl": f[0], "loc": f[1]} for i, f in enumerate(functions)},
+        "f": {str(i): f[2] for i, f in enumerate(functions)},
         **extra,
     }
     report = root / "coverage-final.json"
@@ -259,7 +266,7 @@ def test_exact_positions_as_jest_writes_them_follow_the_same_rule(root):
     # statement that creates thunk, then the one that returns the inner arrow.
     source = "export const thunk = () => () => 1;\n"
     lines = [statement(1, 21, 1), statement(1, 27, 1), statement(1, 33, 0)]
-    calls = [(at(1, 27), 1), (at(1, 33), 0)]
+    calls = [function(1, 21, 22, 27, 1), function(1, 27, 28, 33, 0)]
     report = report_of(root, write(root, "a.ts", source), lines, calls)
     assert rows(typescript.read_report(report)) == [
         ("a.ts", "thunk", "1.12", 1, "50.0%")
@@ -268,7 +275,8 @@ def test_exact_positions_as_jest_writes_them_follow_the_same_rule(root):
 
 def test_lines_end_where_ecmascript_ends_them(root):
     # U+2028 and a lone carriage return end a line. The positions are those
-    # that Vitest 5.1.1 recorded for this source.
+    # that Vitest 5.1.1 recorded for this source, but for one declaration that
+    # here ends at the end of its line, which Istanbul writes without a column.
     source = (
         'export const text = "a\u2028b";\n'
         "export function afterSeparator(x: number) { return x > 0 ? 1 : 2; }\n"
@@ -281,7 +289,11 @@ def test_lines_end_where_ecmascript_ends_them(root):
         root,
         "a.ts",
         [statement(1, 20, 1), statement(3, 44, 1), statement(6, 34, 1)],
-        [(at(3, 42), 1), (at(5, 36), 1), (at(6, 32), 1)],
+        [
+            function(3, 16, 31, 42, 1),
+            function(5, 16, None, 36, 1),
+            function(6, 16, 21, 32, 1),
+        ],
         [(at(3, 51), arms, [1, 0])],
     )
     assert rows(typescript.read_report(report)) == [
@@ -293,7 +305,7 @@ def test_lines_end_where_ecmascript_ends_them(root):
 
 def test_absolute_file_name_matches_the_report(root):
     name = write(root, "a.ts", "export const f = () => 1;\n")
-    report = report_of(root, name, functions=[(at(1, 23), 1)])
+    report = report_of(root, name, functions=[function(1, 13, 23, 23, 1)])
     assert len(typescript.read_report(report, [str(root / name)])) == 1
 
 
