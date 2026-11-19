@@ -182,6 +182,14 @@ def test_budget_of_a_file_in_git_but_not_on_disk_passes(tracked, capsys):
     assert run(capsys, ".token-budgets.toml")[0] == 0
 
 
+def test_budget_of_a_file_with_an_unusual_name_in_git_passes(root, capsys):
+    git(root, "init", "-q")
+    name = write(root, "big\r\u00e9.md", 40_000)
+    budgets(root, '[budgets]\n"big\\r\u00e9.md" = 10000\n')
+    git(root, "add", name, ".token-budgets.toml")
+    assert run(capsys, ".token-budgets.toml")[0] == 0
+
+
 def test_budget_key_with_a_leading_dot_slash_applies(root, capsys):
     name = write(root, "big.md", 48_000)
     budgets(root, '[budgets]\n"./big.md" = 12000\n')

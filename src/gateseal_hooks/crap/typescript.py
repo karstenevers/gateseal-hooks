@@ -69,6 +69,8 @@ TRANSPARENT = frozenset(
         "instantiation_expression",
     }
 )
+# Istanbul starts these where the expression inside starts; `<T>x` starts at <.
+UNWRAPPED = TRANSPARENT - {"type_assertion"}
 CALLS = frozenset({"arguments", "call_expression"})
 DECISIONS = frozenset(
     {
@@ -85,7 +87,8 @@ DECISIONS = frozenset(
 SHORT_CIRCUIT = frozenset({"&&", "||", "??", "&&=", "||=", "??="})
 # The pinned grammar cannot parse `export type * from`. Blanking `type` keeps
 # every position.
-TYPE_STAR = re.compile(rb"(?<![\w$.])export(\s+)type(?=\s*\*)")
+GAP = rb"(?:\s|/\*[\s\S]*?\*/|//[^\n]*\n)"
+TYPE_STAR = re.compile(rb"(?<![\w$.])(export" + GAP + rb"+)type(?=" + GAP + rb"*\*)")
 
 # A line counted from 1 and a column in UTF-16 units, as Istanbul counts them.
 Position = tuple[int, int]
@@ -178,8 +181,8 @@ def position(lines: list[bytes], point: tuple[int, int]) -> Position:
 
 
 def unwrapped(node: Node) -> Node:
-    """Istanbul starts `() => (x)`'s body at x, inside the parentheses."""
-    while node.type == "parenthesized_expression":
+    """Istanbul starts the body of `() => (x) as T` at x."""
+    while node.type in UNWRAPPED:
         node = next(child for child in node.named_children if child.type != "comment")
     return node
 
@@ -220,7 +223,7 @@ def parse(file: str) -> list[Unit]:
         source = Path(file).read_bytes()
     except OSError as error:
         raise InputError(file, f"cannot read the source: {error}") from error
-    source = TYPE_STAR.sub(lambda match: b"export" + match[1] + b"    ", source)
+    source = TYPE_STAR.sub(lambda match: match[1] + b"    ", source)
     tree = Parser(GRAMMARS[Path(file).suffix.lower()]).parse(source)
     if tree.root_node.has_error:
         raise InputError(file, "cannot parse the source with tree-sitter")

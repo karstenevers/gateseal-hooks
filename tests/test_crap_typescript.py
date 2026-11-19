@@ -236,6 +236,20 @@ def test_c8_entry_where_a_function_starts_an_arrow_body_is_its_own(root):
     ]
 
 
+def test_arrow_whose_body_is_a_typed_function_keeps_its_own_calls(root):
+    # Vitest starts make at `function`, inside the parentheses and the `as`.
+    source = (
+        "export const make = () => (function inner() { return 1; }) as () => number;\n"
+    )
+    lines = [statement(1, 27, 1), statement(1, 46, 1)]
+    calls = [(statement(1, 27, 0)[0], 1), (statement(1, 44, 0)[0], 1)]
+    report = report_of(root, write(root, "a.ts", source), lines, calls)
+    assert rows(typescript.read_report(report)) == [
+        ("a.ts", "make", "1.00", 1, "100.0%"),
+        ("a.ts", "make.inner", "1.00", 1, "100.0%"),
+    ]
+
+
 def test_function_inside_one_that_never_ran_scores_zero(root):
     # c8 leaves nested out of fnMap and counts whole lines from column 0.
     source = """\
@@ -507,7 +521,9 @@ COMPLEXITY = {
         "types.ts",
         """
         export type * from "./shapes";
-        export type * as Shapes from "./shapes";
+        export /* all */ type
+          // of them
+          * as Shapes from "./shapes";
         export function outer() {
           const cast = <Handler>((n: number) => (n > 0 ? n : 0));
           const bound = (<T,>(x: T) => (x ? x : null))<number>;

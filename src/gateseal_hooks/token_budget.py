@@ -7,6 +7,7 @@ adopted it. Such a file may not grow past its budget.
 """
 
 import argparse
+import os
 import subprocess
 import sys
 import tomllib
@@ -122,10 +123,10 @@ def in_git(paths: list[str]) -> set[str]:
         return set()  # git ls-files with no path lists every file
     command = ["git", "--literal-pathspecs", "ls-files", "-z", "--", *paths]
     try:
-        listed = subprocess.run(command, capture_output=True, check=True, text=True)
+        listed = subprocess.run(command, capture_output=True, check=True).stdout
     except (OSError, subprocess.CalledProcessError):
         return {path for path in paths if Path(path).is_file()}
-    return {Path(name).as_posix() for name in listed.stdout.split("\0") if name}
+    return {Path(os.fsdecode(name)).as_posix() for name in listed.split(b"\0") if name}
 
 
 def budget_findings(
