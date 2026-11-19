@@ -22,6 +22,7 @@ import {
   packed,
   noop,
   after,
+  split,
 } from "./edges.ts";
 
 test("edges", async () => {
@@ -49,4 +50,5 @@ test("edges", async () => {
   assert.equal(packed([]), 1);
   noop();
   assert.equal(after(1), 1);
+  assert.equal(typeof split(), "function");
 });

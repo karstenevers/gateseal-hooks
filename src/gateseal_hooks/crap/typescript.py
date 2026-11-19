@@ -209,16 +209,15 @@ def declared(
 ) -> Span | None:
     """Return the function that an Istanbul function entry names.
 
-    Its declaration, from start to end, is the function's name or its first
-    character. Vitest widens it to the nearest places it can map, so it can
-    touch more than one function between that function's start and its
-    parameters. The entry names the innermost of these whose code holds the
-    entry's body, else the first.
+    The entry runs from start, in the function's declaration, to end, the end
+    of its body. Vitest puts a start that it cannot map on the nearest place
+    before it, which can be on a line before the function. The function has
+    its parameters after start and ends on the line of end. Of several such
+    functions, the entry names the innermost whose code holds the entry's
+    body, else the first.
     """
-    touched = [span for span in spans if span.start <= end and start <= span.code]
-    return owner(touched, body) or min(
-        touched, key=lambda span: span.start, default=None
-    )
+    named = [span for span in spans if start <= span.code and span.end[0] == end[0]]
+    return owner(named, body) or min(named, key=lambda span: span.start, default=None)
 
 
 def parameters(node: Node) -> Node | None:
@@ -370,8 +369,8 @@ def tally_calls(
         function = as_object(value, path, where)
         count = as_count(calls.get(key), path, where)
         start = place(function.get("decl"), path, where)
-        end = place(function.get("decl"), path, where, "end")
         body = place(function.get("loc"), path, where)
+        end = place(function.get("loc"), path, where, "end")
         span = declared(spans, start, end, body) if start and end else None
         if span is None:
             continue

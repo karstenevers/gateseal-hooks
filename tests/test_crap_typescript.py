@@ -98,6 +98,9 @@ EDGES = [
     ("src/edges.ts", "unused", "2.00", 1, "0.0%"),
     # after follows characters that are 4 bytes and 2 UTF-16 units each.
     ("src/edges.ts", "after", "1.00", 1, "100.0%"),
+    # split starts on the line after its name. The test calls only split: 1 of
+    # 2 statements, 0 of 4 branches, as for the same arrow on one line.
+    ("src/edges.ts", "split", "8.21", 3, "16.7%"),
 ]
 EXACT = CASES + EDGES + LEGACY
 # V8 cannot see a default value or a method name run. It gives a default
@@ -169,7 +172,7 @@ def test_main_fails_on_the_cases_over_the_limit(root, capsys):
         "wrapped",
         "jsUntestedBranchy",
     ]
-    assert out[-1] == "61 functions scored, 9 over the limit of 10"
+    assert out[-1] == "62 functions scored, 9 over the limit of 10"
 
 
 def test_named_files_limit_the_scores(root):
@@ -193,10 +196,9 @@ def statement(line, column, hits):
     return at(line, column), hits
 
 
-def function(line, start, end, body, calls):
-    """Return a function declared from start to end, with its body's column."""
-    declared = {**at(line, start), "end": {"line": line, "column": end}}
-    return declared, at(line, body), calls
+def function(line, start, body, calls):
+    """Return a function declared at start, with a body to the end of the line."""
+    return at(line, start), {**at(line, body), "end": {"line": line}}, calls
 
 
 def report_of(root, file, statements=(), functions=(), branches=(), **extra):
@@ -274,7 +276,7 @@ def test_exact_positions_as_jest_writes_them_follow_the_same_rule(root):
     # statement that creates thunk, then the one that returns the inner arrow.
     source = "export const thunk = () => () => 1;\n"
     lines = [statement(1, 21, 1), statement(1, 27, 1), statement(1, 33, 0)]
-    calls = [function(1, 21, 22, 27, 1), function(1, 27, 28, 33, 0)]
+    calls = [function(1, 21, 27, 1), function(1, 27, 33, 0)]
     report = report_of(root, write(root, "a.ts", source), lines, calls)
     assert rows(typescript.read_report(report)) == [
         ("a.ts", "thunk", "1.12", 1, "50.0%")
@@ -283,8 +285,7 @@ def test_exact_positions_as_jest_writes_them_follow_the_same_rule(root):
 
 def test_lines_end_where_ecmascript_ends_them(root):
     # U+2028 and a lone carriage return end a line. The positions are those
-    # that Vitest 5.1.1 recorded for this source, but for one declaration that
-    # here ends at the end of its line, which Istanbul writes without a column.
+    # that Vitest 5.1.1 recorded for this source.
     source = (
         'export const text = "a\u2028b";\n'
         "export function afterSeparator(x: number) { return x > 0 ? 1 : 2; }\n"
@@ -298,9 +299,9 @@ def test_lines_end_where_ecmascript_ends_them(root):
         "a.ts",
         [statement(1, 20, 1), statement(3, 44, 1), statement(6, 34, 1)],
         [
-            function(3, 16, 31, 42, 1),
-            function(5, 16, None, 36, 1),
-            function(6, 16, 21, 32, 1),
+            function(3, 16, 42, 1),
+            function(5, 16, 36, 1),
+            function(6, 16, 32, 1),
         ],
         [(at(3, 51), arms, [1, 0])],
     )
@@ -313,7 +314,7 @@ def test_lines_end_where_ecmascript_ends_them(root):
 
 def test_absolute_file_name_matches_the_report(root):
     name = write(root, "a.ts", "export const f = () => 1;\n")
-    report = report_of(root, name, functions=[function(1, 13, 23, 23, 1)])
+    report = report_of(root, name, functions=[function(1, 13, 23, 1)])
     assert len(typescript.read_report(report, [str(root / name)])) == 1
 
 
