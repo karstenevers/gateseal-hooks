@@ -208,6 +208,20 @@ def test_budgets_option_names_the_file(root, capsys):
     assert run(capsys, "--budgets", "limits.toml", name) == (0, [], "")
 
 
+def test_absolute_budgets_option_matches_the_changed_budgets_file(root, capsys):
+    write(root, "big.md", 40_000)
+    budgets(root, '[budgets]\n"big.md" = 9500\n')
+    path = str(root / ".token-budgets.toml")
+    assert run(capsys, "--budgets", path, ".token-budgets.toml")[0] == 1
+
+
+def test_file_name_that_starts_with_a_dash_is_checked(root, capsys):
+    name = write(root, "-notes.md", 36_004)
+    code, out, _ = run(capsys, "--", name)
+    assert code == 1
+    assert out[0].startswith("-notes.md: about 9,001 tokens")
+
+
 @pytest.mark.parametrize(
     ("text", "detail"),
     [

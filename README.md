@@ -20,6 +20,8 @@ repos:
         files: ^src/
 ```
 
+To set an option, add it to `args` and end the list with `--`, for example `args: [--limit, "15", --]`. Then a file name that starts with `-` is not read as an option.
+
 Each hook needs Python 3.11 or later. `crap-score-typescript` also installs the tree-sitter parsers, the others need no other package.
 
 ## token-budget

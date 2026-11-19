@@ -75,20 +75,23 @@ def parse_source(path: str) -> dict[str, list[Definition]]:
     except (OSError, SyntaxError, ValueError) as error:
         raise InputError(path, f"cannot parse Python source: {error}") from error
     named: dict[str, list[Definition]] = {}
-    for name, node in definitions(tree, ""):
+    for name, node in definitions(tree):
         named.setdefault(name, []).append(node)
     return named
 
 
-def definitions(node: ast.AST, scope: str) -> Iterator[tuple[str, Definition]]:
-    for child in ast.iter_child_nodes(node):
-        if not isinstance(child, SCOPES):
-            yield from definitions(child, scope)
-            continue
-        name = scope + child.name
-        if not isinstance(child, ast.ClassDef):
-            yield name, child
-        yield from definitions(child, name + ".")
+def definitions(tree: ast.AST) -> Iterator[tuple[str, Definition]]:
+    """Yield each def under its dotted name, in source order, without recursion."""
+    stack: list[tuple[ast.AST, str]] = [(tree, "")]
+    while stack:
+        node, scope = stack.pop()
+        if isinstance(node, SCOPES):
+            name = scope + node.name
+            if not isinstance(node, ast.ClassDef):
+                yield name, node
+            scope = name + "."
+        children = reversed(list(ast.iter_child_nodes(node)))
+        stack.extend((child, scope) for child in children)
 
 
 def body_lines(function: Definition) -> set[int]:

@@ -549,7 +549,7 @@ COMPLEXITY = {
         """,
         {"outer": 2, "outer.inner": 2},
     ),
-    "type-only star exports, type assertions and instantiations": (
+    "syntax the pinned grammar lacks, type assertions and instantiations": (
         "types.ts",
         """
         export type * from "./shapes";
@@ -561,8 +561,12 @@ COMPLEXITY = {
           const bound = (<T,>(x: T) => (x ? x : null))<number>;
           return [cast, bound];
         }
+        export async function dispose(items: Disposable[], later: AsyncDisposable[]) {
+          for (using item of items) {}
+          for (await using item of later) {}
+        }
         """,
-        {"outer": 1, "outer.bound": 2, "outer.cast": 2},
+        {"dispose": 3, "outer": 1, "outer.bound": 2, "outer.cast": 2},
     ),
 }
 

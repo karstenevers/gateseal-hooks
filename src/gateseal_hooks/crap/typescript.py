@@ -86,10 +86,13 @@ DECISIONS = frozenset(
     }
 )
 SHORT_CIRCUIT = frozenset({"&&", "||", "??", "&&=", "||=", "??="})
-# The pinned grammar cannot parse `export type * from`. Blanking `type` keeps
-# every position.
+# The pinned grammar cannot parse `export type * from` or `for (using x of y)`.
+# Blanking the last group of each match keeps every position.
 GAP = rb"(?:\s|/\*(?:[^*]|\*(?!/))*\*/|//[^\n]*\n)"
-TYPE_STAR = re.compile(rb"(?<![\w$.])(export" + GAP + rb"+)type(?=" + GAP + rb"*\*)")
+UNPARSED = (
+    re.compile(rb"(?<![\w$.])export" + GAP + rb"+(type)(?=" + GAP + rb"*\*)"),
+    re.compile(rb"(?<![\w$.])for\s*(?:await\s*)?\(\s*((?:await\s+)?using)(?=\s+[\w$])"),
+)
 
 # A line counted from 1 and a column in UTF-16 units, as Istanbul counts them.
 Position = tuple[int, int]
@@ -222,12 +225,18 @@ def units_of(root: Node, lines: list[bytes]) -> list[Unit]:
     return units
 
 
+def blanked(match: re.Match[bytes]) -> bytes:
+    kept = match[0][: match.start(1) - match.start()]
+    return kept + re.sub(rb"[^\n]", b" ", match[1])
+
+
 def parse(file: str) -> list[Unit]:
     try:
         source = Path(file).read_bytes()
     except OSError as error:
         raise InputError(file, f"cannot read the source: {error}") from error
-    source = TYPE_STAR.sub(lambda match: match[1] + b"    ", source)
+    for pattern in UNPARSED:
+        source = pattern.sub(blanked, source)
     tree = Parser(GRAMMARS[Path(file).suffix.lower()]).parse(source)
     if tree.root_node.has_error:
         raise InputError(file, "cannot parse the source with tree-sitter")

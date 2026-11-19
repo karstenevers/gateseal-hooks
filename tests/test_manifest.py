@@ -29,3 +29,8 @@ def test_typescript_hook_gets_every_file_the_scorer_parses():
     hooks = yaml.safe_load((ROOT / ".pre-commit-hooks.yaml").read_text())
     hook = next(hook for hook in hooks if hook["id"] == "crap-score-typescript")
     assert [s for s in GRAMMARS if not re.search(hook["files"], f"a{s}")] == []
+
+
+def test_every_hook_ends_its_options_before_the_file_names():
+    hooks = yaml.safe_load((ROOT / ".pre-commit-hooks.yaml").read_text())
+    assert [hook["id"] for hook in hooks if hook.get("args") != ["--"]] == []

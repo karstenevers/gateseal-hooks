@@ -178,7 +178,7 @@ def main(argv: list[str] | None = None) -> int:
     except InputError as error:
         print(f"token-budget: {error}", file=sys.stderr)
         return 1
-    if budgets_path in {Path(file) for file in files}:
+    if os.path.abspath(budgets_path) in {os.path.abspath(file) for file in files}:
         files = [*files, *(path for path in budgets if Path(path).is_file())]
     oversized = list(size_findings(files, cap, budgets))
     stale = list(budget_findings(files, cap, budgets))

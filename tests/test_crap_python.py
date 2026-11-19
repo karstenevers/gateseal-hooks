@@ -519,3 +519,10 @@ def test_named_file_the_report_does_not_measure_fails(root, capsys):
     error = capsys.readouterr().err
     assert code == 1
     assert "does not measure new.py" in error
+
+
+def test_long_expression_does_not_exhaust_the_stack(tmp_path):
+    source = tmp_path / "long.py"
+    terms = " + ".join(["1"] * 1200)
+    source.write_text(f"total = {terms}\n\n\ndef f():\n    return total\n")
+    assert list(crap.parse_source(str(source))) == ["f"]
