@@ -44,7 +44,7 @@ def decisions(node: ast.AST) -> int:
             return 0
 
 
-def definition_time(nested: Definition) -> list[ast.expr]:
+def definition_time_nodes(nested: Definition) -> list[ast.expr]:
     """Return the parts of a nested def that the enclosing code runs."""
     defaults = [default for default in nested.args.kw_defaults if default]
     return [*nested.decorator_list, *nested.args.defaults, *defaults]
@@ -56,7 +56,7 @@ def own_nodes(function: Definition) -> Iterator[ast.AST]:
     while stack:
         node = stack.pop()
         if isinstance(node, Definition):
-            stack.extend(definition_time(node))
+            stack.extend(definition_time_nodes(node))
             continue
         yield node
         stack.extend(ast.iter_child_nodes(node))
@@ -119,7 +119,7 @@ def branch_sources(value: object, path: str, where: str) -> list[int]:
     return sources
 
 
-def lines_coverage(
+def coverage(
     entry: dict[str, object], lines: set[int] | None, path: str, where: str
 ) -> float:
     """Return the share of the entry's statements and branches that ran.
@@ -154,7 +154,7 @@ def lines_coverage(
     )
 
 
-def score_file(
+def file_scores(
     file: str, entry: dict[str, object], report_path: str
 ) -> Iterator[Score]:
     functions = as_object(entry.get("functions"), report_path, f"{file} functions")
@@ -198,9 +198,9 @@ def name_scores(
     is measured the same way from the file's lines.
     """
     shares = [
-        lines_coverage(region, None, report_path, f"{file} function {name}")
+        coverage(region, None, report_path, f"{file} function {name}")
         if node.lineno == line
-        else lines_coverage(entry, own_lines(node), report_path, file)
+        else coverage(entry, own_lines(node), report_path, file)
         for node in found
     ]
     for index, (node, measured) in enumerate(zip(found, shares, strict=True), 1):
@@ -230,7 +230,7 @@ def read_report(path: str, only: Collection[str] = ()) -> list[Score]:
         score
         for file, entry in files.items()
         if not wanted or Path(file) in wanted
-        for score in score_file(file, as_object(entry, path, file), path)
+        for score in file_scores(file, as_object(entry, path, file), path)
     ]
 
 

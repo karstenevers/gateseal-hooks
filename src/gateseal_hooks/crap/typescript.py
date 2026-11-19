@@ -326,7 +326,9 @@ def parse(file: str) -> list[Span]:
     raise InputError(file, "cannot parse the source with tree-sitter")
 
 
-def place(value: object, path: str, where: str, edge: str = "start") -> Position | None:
+def report_position(
+    value: object, path: str, where: str, edge: str = "start"
+) -> Position | None:
     """Return where an Istanbul location starts or ends, or None for an empty one."""
     point = as_object(value, path, where).get(edge)
     if point is None:
@@ -344,7 +346,10 @@ def statement_hits(entry: dict[str, object], path: str, file: str) -> Iterator[H
     where = f"{file} statementMap"
     hits = as_object(entry.get("s"), path, f"{file} s")
     for key, location in as_object(entry.get("statementMap"), path, where).items():
-        yield place(location, path, where), as_count(hits.get(key), path, where)
+        yield (
+            report_position(location, path, where),
+            as_count(hits.get(key), path, where),
+        )
 
 
 def branch_hits(entry: dict[str, object], path: str, file: str) -> Iterator[Hit]:
@@ -362,7 +367,8 @@ def branch_hits(entry: dict[str, object], path: str, file: str) -> Iterator[Hit]
         if len(counts) != len(locations):
             raise InputError(path, f"{where} {key} has {len(counts)} counts")
         starts = (
-            place(location, path, where) for location in (branch.get("loc"), *locations)
+            report_position(location, path, where)
+            for location in (branch.get("loc"), *locations)
         )
         at = next((start for start in starts if start), None)
         for count in counts:
@@ -390,9 +396,9 @@ def tally_calls(
     for key, value in as_object(entry.get("fnMap"), path, where).items():
         function = as_object(value, path, where)
         count = as_count(calls.get(key), path, where)
-        start = place(function.get("decl"), path, where)
-        body = place(function.get("loc"), path, where)
-        end = place(function.get("loc"), path, where, "end")
+        start = report_position(function.get("decl"), path, where)
+        body = report_position(function.get("loc"), path, where)
+        end = report_position(function.get("loc"), path, where, "end")
         span = declared(spans, start, end, body) if start and end else None
         if span is None or start is None:
             continue

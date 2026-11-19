@@ -120,7 +120,7 @@ def size_findings(
             )
 
 
-def in_git(paths: list[str]) -> set[str]:
+def tracked_paths(paths: list[str]) -> set[str]:
     """Return the paths in Git's index; outside a repository, those on disk."""
     if not paths:
         return set()
@@ -138,7 +138,7 @@ def budget_findings(
     paths: Iterable[str], cap: int, budgets: dict[str, int]
 ) -> Iterator[str]:
     checked = set(paths)
-    tracked = in_git(sorted(budgets))
+    tracked = tracked_paths(sorted(budgets))
     for path, budget in sorted(budgets.items()):
         # A sparse checkout leaves a file in the index but not on disk.
         if path not in tracked:
