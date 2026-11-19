@@ -187,6 +187,11 @@ BAD_INPUT = {
         lambda root: (root / "m.py").write_text(branchy("f", 1) + branchy("g", 1)),
         "coverage.json",
     ),
+    "decision on the def line": (
+        # The def line runs at import, so its decision looks covered.
+        lambda root: (root / "m.py").write_text("def f(x): return x if x else 0\n"),
+        "m.py: line 1 has the def of f and its body",
+    ),
     "repeated name without file lines": (
         lambda root: (root / "m.py").write_text(branchy("f", 1) * 2),
         "coverage.json",

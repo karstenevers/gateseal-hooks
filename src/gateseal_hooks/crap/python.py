@@ -196,6 +196,9 @@ def name_scores(
     coverage.py reports one region per name, for the def that starts on line.
     Another def of that name, such as a property's getter beside its setter,
     is measured the same way from the file's lines.
+
+    A def line runs when Python makes the function, so decisions on it look
+    covered in a function that never ran. Such a def fails.
     """
     shares = [
         lines_coverage(region, None, report_path, f"{file} function {name}")
@@ -205,6 +208,12 @@ def name_scores(
     ]
     for index, (node, measured) in enumerate(zip(found, shares, strict=True), 1):
         count = complexity(node)
+        if count > 1 and node.body[0].lineno == node.lineno:
+            raise InputError(
+                file,
+                f"line {node.lineno} has the def of {name} and its body, so "
+                "coverage.py cannot tell if the body ran. Put the body on its own line",
+            )
         key = name if index == 1 else f"{name}#{index}"
         yield Score(file, key, crap(count, measured), count, measured)
 
