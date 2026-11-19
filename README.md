@@ -4,6 +4,7 @@ Plain [pre-commit](https://pre-commit.com) hooks, usable with or without [gatese
 | --- | --- | --- |
 | `token-budget` | a file is too large to read and review in one piece | at each commit |
 | `crap-score-python` | a Python function is both complex and poorly tested | in CI, after the tests |
+| `crap-score-typescript` | the same, for TypeScript and JavaScript | in CI, after the tests |
 
 ## Use the hooks
 
@@ -19,7 +20,7 @@ repos:
         files: ^src/
 ```
 
-Each hook needs Python 3.11 or later and no other package.
+The Python hooks need Python 3.11 or later and no other package. `crap-score-typescript` needs Node.js 18 or later.
 
 ## token-budget
 
@@ -67,6 +68,21 @@ pre-commit run crap-score-python --hook-stage manual --all-files
 It scores only the files pre-commit gives it. With `files: ^src/` it skips the tests. To score only the files that a pull request changes, run it with `--from-ref origin/main --to-ref HEAD` in place of `--all-files`. The hook fails when the report does not measure a file it gets. Add the file to coverage.py's `source`, or leave it out with `files` or `exclude`.
 
 **Options.** `--coverage path.json` reads another report. `--limit 15` sets another limit.
+
+## crap-score-typescript
+
+The hook runs [crap4ts](https://github.com/breezy-bays-labs/crap4ts) 1.0.1, a separate tool under the GPL-3.0 licence, which pre-commit installs from npm. It uses the same formula and the same limit of 10.
+
+Make a coverage report first. crap4ts reads `coverage/coverage-final.json` from Vitest, Jest or c8:
+
+```sh
+npx vitest run --coverage --coverage.reporter=json
+pre-commit run crap-score-typescript --hook-stage manual --all-files
+```
+
+It scores every source file it finds, and a function with no coverage scores 0%. It uses line coverage, because its branch mode counted untested functions as covered with c8 reports.
+
+**Options.** `--threshold 15` sets another limit. `--coverage path.json` reads another report. `--changed-since origin/main` scores only the files a branch changes.
 
 ## Mutation testing
 
