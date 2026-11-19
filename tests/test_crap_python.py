@@ -319,7 +319,7 @@ COMPLEXITY = {
         """,
         {"f": 4, "f.g": 2},
     ),
-    "nested def and class count on their own": (
+    "nested def counts on its own, a class body in its function": (
         """
         def f(x):
             def g():
@@ -335,7 +335,7 @@ COMPLEXITY = {
 
             return g, C
         """,
-        {"f": 1, "f.g": 2, "f.C.h": 2},
+        {"f": 2, "f.g": 2, "f.C.h": 2},
     ),
 }
 
@@ -390,6 +390,19 @@ FIXTURE = {
             return 0
 
 
+        def build(flag):
+            class Local:
+                if flag:
+                    mode = "on"
+                else:
+                    mode = "off"
+
+                def get(self):
+                    return self.mode
+
+            return Local
+
+
         def guard(flag, count):
             if flag:
                 while count:  # pragma: no branch
@@ -441,7 +454,7 @@ FIXTURE = {
                         item -= 1
         """,
     "drive.py": """
-        from pkg.used import Box, Shape, guard, outer
+        from pkg.used import Box, Shape, build, guard, outer
 
         for kind in ("triangle", "square", "circle"):
             Shape(kind).sides()
@@ -454,6 +467,7 @@ FIXTURE = {
         box.spare = 2
         assert box.spare == 2
         assert guard(False, 0) == 0
+        assert build(True).mode == "on"
         """,
 }
 
@@ -507,6 +521,9 @@ def test_real_report_scores_every_function(measured, monkeypatch):
         ("pkg/used.py", "guard"): (4.12, 3, 0.5),
         ("pkg/used.py", "Box.spare"): (4.12, 3, 0.5),
         ("pkg/used.py", "Box.spare#2"): (1.0, 1, 1.0),
+        # The body of Local runs in build: 5 of 6 lines and 1 of 2 branches.
+        ("pkg/used.py", "build"): (2.06, 2, 0.75),
+        ("pkg/used.py", "build.Local.get"): (2.0, 1, 0.0),
         ("pkg/unused.py", "lonely"): (6.0, 2, 0.0),
         ("pkg/unused.py", "Ghost.haunt"): (12.0, 3, 0.0),
     }
@@ -520,7 +537,7 @@ def test_real_report_fails_on_untested_functions(measured, monkeypatch, capsys):
         ("pkg/unused.py", "Ghost.haunt", "12.00", "3", "0.0%"),
         ("pkg/used.py", "idle", "12.00", "3", "0.0%"),
     ]
-    assert summary == "16 functions scored, 2 over the limit of 10"
+    assert summary == "18 functions scored, 2 over the limit of 10"
 
 
 def test_defaults_read_coverage_json_with_a_limit_of_10(root, capsys):
