@@ -220,8 +220,18 @@ def test_c8_report_fails(root):
         typescript.read_report(report_of(root, name, all=False))
 
 
-def test_source_that_does_not_parse_fails(root):
-    name = write(root, "broken.ts", "export function f(a: number) {\n  if (a > 0 {\n")
+@pytest.mark.parametrize(
+    "source",
+    [
+        "export function f(a: number) {\n  if (a > 0 {\n",
+        "export function f(a: number) { return a +* 2; }\n",
+        "export const x = (1;\nexport function f() { return 1; }\n",
+        "@@@ x => 1;\n",
+    ],
+    ids=["skips a (", "inside a function", "lacks a token", "skips a =>"],
+)
+def test_syntax_error_that_can_change_a_score_fails(root, source):
+    name = write(root, "broken.ts", source)
     with pytest.raises(typescript.InputError, match="broken.ts: cannot parse"):
         typescript.read_report(report_of(root, name))
 
@@ -233,11 +243,6 @@ def test_function_without_data_in_the_report_fails(root):
 
 
 ONE_LINER = "export const f = (x: number) => (x > 0 ? 1 : 2);\n"
-
-
-def test_many_comments_after_export_parse_quickly(root):
-    source = "export " + "/* c */ " * 40 + "function f() {\n  return 1;\n}\n"
-    assert names(typescript.parse(write(root, "a.ts", source))) == ["f"]
 
 
 def names(spans):

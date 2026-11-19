@@ -87,24 +87,21 @@ DECISIONS = frozenset(
     }
 )
 SHORT_CIRCUIT = frozenset({"&&", "||", "??", "&&=", "||=", "??="})
-# The pinned grammar cannot parse `export type * from` or `for (using x of y)`.
-# Blanking the last group of each match keeps every position.
+# The pinned grammar cannot parse `for (using x of y)`. Blanking `using` keeps
+# every position.
 GAP = rb"(?:\s|/\*(?:[^*]|\*(?!/))*\*/|//[^\n]*\n)"
-UNPARSED = (
-    re.compile(rb"(?<![\w$.])export" + GAP + rb"+(type)(?=" + GAP + rb"*\*)"),
-    re.compile(
-        rb"(?<![\w$.])for"
-        + GAP
-        + rb"*(?:await"
-        + GAP
-        + rb"*)?\("
-        + GAP
-        + rb"*((?:await"
-        + GAP
-        + rb"+)?using)(?="
-        + GAP
-        + rb"+[\w$\x80-\xff])"
-    ),
+USING_LOOP = re.compile(
+    rb"(?<![\w$.])for"
+    + GAP
+    + rb"*(?:await"
+    + GAP
+    + rb"*)?\("
+    + GAP
+    + rb"*((?:await"
+    + GAP
+    + rb"+)?using)(?="
+    + GAP
+    + rb"+[\w$\x80-\xff])"
 )
 
 # A line counted from 1 and a column in UTF-16 units, as Istanbul counts them.
@@ -260,21 +257,36 @@ def blanked(match: re.Match[bytes]) -> bytes:
     return kept + re.sub(rb"[^\n]", b" ", match[1])
 
 
+def scorable(root: Node) -> bool:
+    """Return whether no syntax error in the tree can change a score.
+
+    The pinned grammar lacks some syntax, such as `export type * from`. An
+    error outside each function hides no function when the text it skips
+    holds no `(` and no `=>`.
+    """
+    stack = [(root, False)]
+    while stack:
+        node, skipped = stack.pop()
+        if node.is_missing or (node.has_error and node.type in FUNCTIONS):
+            return False
+        if skipped and node.type in ("(", "=>"):
+            return False
+        skipped = skipped or node.is_error
+        stack.extend((child, skipped) for child in node.children)
+    return True
+
+
 def parse(file: str) -> list[Span]:
     try:
         source = Path(file).read_bytes()
     except OSError as error:
         raise InputError(file, f"cannot read the source: {error}") from error
     parser = Parser(GRAMMARS[Path(file).suffix.lower()])
-    tree = parser.parse(source)
-    if tree.root_node.has_error:
-        parsed = source
-        for pattern in UNPARSED:
-            parsed = pattern.sub(blanked, parsed)
-        tree = parser.parse(parsed)
-    if tree.root_node.has_error:
-        raise InputError(file, "cannot parse the source with tree-sitter")
-    return spans_of(tree.root_node, source.split(b"\n"))
+    for text in (source, USING_LOOP.sub(blanked, source)):
+        root = parser.parse(text).root_node
+        if not root.has_error or scorable(root):
+            return spans_of(root, source.split(b"\n"))
+    raise InputError(file, "cannot parse the source with tree-sitter")
 
 
 def start_of(value: object, path: str, where: str) -> Position | None:

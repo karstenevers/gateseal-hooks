@@ -1,4 +1,5 @@
 export type * from "./cases";
+export { default as data } from "./data.json" with { type: "json" };
 
 export const paren = (x: number) => (x > 0 ? 1 : 2);
 export const cast = (x: number) => (x > 0 ? 1 : 2) as number;
