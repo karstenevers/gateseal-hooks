@@ -49,6 +49,9 @@ FUNCTIONS = frozenset(
         "method_definition",
     }
 )
+EXPRESSIONS = frozenset(
+    {"function_expression", "function", "generator_function", "arrow_function"}
+)
 CLASSES = frozenset({"class_declaration", "abstract_class_declaration", "class"})
 NAMESPACES = frozenset({"internal_module", "module"})
 # A function in one of these is named after the field that holds it.
@@ -69,8 +72,6 @@ TRANSPARENT = frozenset(
         "instantiation_expression",
     }
 )
-# Istanbul starts these where the expression inside starts; `<T>x` starts at <.
-UNWRAPPED = TRANSPARENT - {"type_assertion"}
 CALLS = frozenset({"arguments", "call_expression"})
 DECISIONS = frozenset(
     {
@@ -87,7 +88,7 @@ DECISIONS = frozenset(
 SHORT_CIRCUIT = frozenset({"&&", "||", "??", "&&=", "||=", "??="})
 # The pinned grammar cannot parse `export type * from`. Blanking `type` keeps
 # every position.
-GAP = rb"(?:\s|/\*[\s\S]*?\*/|//[^\n]*\n)"
+GAP = rb"(?:\s|/\*(?:[^*]|\*(?!/))*\*/|//[^\n]*\n)"
 TYPE_STAR = re.compile(rb"(?<![\w$.])(export" + GAP + rb"+)type(?=" + GAP + rb"*\*)")
 
 # A line counted from 1 and a column in UTF-16 units, as Istanbul counts them.
@@ -103,6 +104,7 @@ class Unit:
     start: Position
     body: Position
     end: Position
+    expression: bool
     complexity: int = 1
 
 
@@ -181,9 +183,10 @@ def position(lines: list[bytes], point: tuple[int, int]) -> Position:
 
 
 def unwrapped(node: Node) -> Node:
-    """Istanbul starts the body of `() => (x) as T` at x."""
-    while node.type in UNWRAPPED:
-        node = next(child for child in node.named_children if child.type != "comment")
+    """Vitest erases types first, so it starts the body of `() => <T>(x)` at x."""
+    while node.type in TRANSPARENT:
+        inner = [child for child in node.named_children if child.type != "comment"]
+        node = inner[-1] if node.type == "type_assertion" else inner[0]
     return node
 
 
@@ -205,6 +208,7 @@ def units_of(root: Node, lines: list[bytes]) -> list[Unit]:
                     position(lines, node.start_point),
                     position(lines, unwrapped(body).start_point),
                     position(lines, node.end_point),
+                    node.type in EXPRESSIONS,
                 )
                 units.append(unit)
                 scope = (*scope, name)
@@ -247,9 +251,21 @@ def start_of(value: object, path: str, where: str) -> Position | None:
     return line, max(column, 0)  # c8 writes -1 for the start of a line
 
 
-def owner(units: list[Unit], at: Position | None) -> Unit | None:
-    """Return the innermost unit that holds at."""
-    inside = [unit for unit in units if at and unit.start <= at < unit.end]
+def owner(
+    units: list[Unit], at: Position | None, statement: bool = False
+) -> Unit | None:
+    """Return the innermost unit that holds at.
+
+    A statement that starts where a function expression starts, such as the
+    return in `() => function f() {}`, runs in the code around it.
+    """
+    inside = [
+        unit
+        for unit in units
+        if at
+        and unit.start <= at < unit.end
+        and not (statement and unit.expression and at == unit.start)
+    ]
     return max(inside, key=lambda unit: unit.start, default=None)
 
 
@@ -310,7 +326,7 @@ def tallies(
 ) -> dict[str, Tally]:
     found = {unit.name: Tally() for unit in units}
     for at, count in statement_hits(entry, path, file):
-        if (unit := owner(units, at)) is not None:
+        if (unit := owner(units, at, statement=True)) is not None:
             found[unit.name].statements += 1
             found[unit.name].covered += count > 0
     for at, count in branch_hits(entry, path, file):

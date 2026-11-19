@@ -236,17 +236,49 @@ def test_c8_entry_where_a_function_starts_an_arrow_body_is_its_own(root):
     ]
 
 
-def test_arrow_whose_body_is_a_typed_function_keeps_its_own_calls(root):
-    # Vitest starts make at `function`, inside the parentheses and the `as`.
-    source = (
-        "export const make = () => (function inner() { return 1; }) as () => number;\n"
-    )
-    lines = [statement(1, 27, 1), statement(1, 46, 1)]
-    calls = [(statement(1, 27, 0)[0], 1), (statement(1, 44, 0)[0], 1)]
-    report = report_of(root, write(root, "a.ts", source), lines, calls)
-    assert rows(typescript.read_report(report)) == [
+TYPED = {
+    "as": ("(function inner() { return 1; }) as () => number", 27, 44, 46),
+    "type assertion": ("<() => number>(function inner() { return 1; })", 41, 58, 60),
+}
+
+
+@pytest.mark.parametrize(("body", "start", "brace", "inner"), TYPED.values(), ids=TYPED)
+def test_arrow_whose_body_is_a_typed_function_keeps_its_own_calls(
+    root, body, start, brace, inner
+):
+    # Vitest erases types first, so make starts at `function`, as does the
+    # statement that returns it.
+    name = write(root, "a.ts", f"export const make = () => {body};\n")
+    lines = [statement(1, start, 1), statement(1, inner, 1)]
+    calls = [(statement(1, start, 0)[0], 1), (statement(1, brace, 0)[0], 1)]
+    assert rows(typescript.read_report(report_of(root, name, lines, calls))) == [
         ("a.ts", "make", "1.00", 1, "100.0%"),
         ("a.ts", "make.inner", "1.00", 1, "100.0%"),
+    ]
+
+
+def test_statement_that_creates_a_function_counts_around_it(root):
+    source = """\
+        export const factory = () => function handler(x: number): number {
+          if (x > 3) return 4;
+          if (x > 2) return 3;
+          return 1;
+        };
+        """
+    hits = [(1, 29, 1), (2, 2, 1), (2, 13, 1), (3, 2, 0), (3, 13, 0), (4, 2, 0)]
+    lines = [statement(*hit) for hit in hits]
+    calls = [(statement(1, 29, 0)[0], 1), (statement(1, 65, 0)[0], 1)]
+    report = report_of(root, write(root, "a.ts", source), lines, calls)
+    assert rows(typescript.read_report(report)) == [
+        ("a.ts", "factory", "1.00", 1, "100.0%"),
+        ("a.ts", "factory.handler", "4.94", 3, "40.0%"),
+    ]
+
+
+def test_many_comments_after_export_parse_quickly(root):
+    source = "export " + "/* c */ " * 40 + "function f() {\n  return 1;\n}\n"
+    assert [unit.name for unit in typescript.parse(write(root, "a.ts", source))] == [
+        "f"
     ]
 
 
