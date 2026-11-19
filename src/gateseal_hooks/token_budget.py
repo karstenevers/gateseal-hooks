@@ -74,8 +74,11 @@ def is_exempt(path: str) -> bool:
     """Lockfiles are generated and changelogs only grow, so the cap skips them."""
     name = Path(path).name
     stem, dot, suffix = name.lower().partition(".")
+    if stem in CHANGELOGS and dot + suffix in CHANGELOG_SUFFIXES:
+        return True
+    # Python's standard lockfile is pylock.toml or pylock.<name>.toml.
     return name in LOCKFILES or (
-        stem in CHANGELOGS and dot + suffix in CHANGELOG_SUFFIXES
+        stem == "pylock" and suffix.rpartition(".")[2] == "toml"
     )
 
 

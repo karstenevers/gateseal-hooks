@@ -56,6 +56,8 @@ def test_cap_option(root, capsys):
     [
         "uv.lock",
         "deno.lock",
+        "pylock.toml",
+        "pylock.dev.toml",
         "web/package-lock.json",
         "CHANGELOG.md",
         "docs/NEWS",
@@ -67,7 +69,9 @@ def test_lockfiles_and_changelogs_are_exempt(root, capsys, name):
     assert run(capsys, name) == (0, [], "")
 
 
-@pytest.mark.parametrize("name", ["changelog_tool.py", "history.py", "uv.lock.bak"])
+@pytest.mark.parametrize(
+    "name", ["changelog_tool.py", "history.py", "uv.lock.bak", "pylock.xtoml"]
+)
 def test_names_like_exempt_files_are_checked(root, capsys, name):
     write(root, name, 100_000)
     code, out, _ = run(capsys, name)
