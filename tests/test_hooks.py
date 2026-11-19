@@ -78,7 +78,7 @@ def test_token_budget_runs_when_a_commit_only_deletes_a_budgeted_file(
     (repository / "big.md").unlink()
     result = try_hook(repository, environment, "token-budget")
     assert result.returncode == 1, result.stdout + result.stderr
-    assert "big.md: has a budget but is not a file." in result.stdout
+    assert "big.md: has a budget but is not a file in Git." in result.stdout
 
 
 def test_crap_score_python_reads_a_real_coverage_report(repository, environment):

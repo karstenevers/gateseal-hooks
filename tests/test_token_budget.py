@@ -1,3 +1,5 @@
+import subprocess
+
 import pytest
 
 from gateseal_hooks import token_budget
@@ -7,6 +9,9 @@ from gateseal_hooks import token_budget
 def root(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     return tmp_path
+
+
+NOT_IN_GIT = "{}: has a budget but is not a file in Git. Rename or remove it."
 
 
 def write(root, name, size):
@@ -120,7 +125,7 @@ def test_budget_of_a_missing_file_fails(root, capsys):
     budgets(root, '[budgets]\n"gone.md" = 12000\n')
     code, out, _ = run(capsys, name)
     assert code == 1
-    assert out[0] == "gone.md: has a budget but is not a file. Rename or remove it."
+    assert out[0] == NOT_IN_GIT.format("gone.md")
 
 
 def test_changed_budgets_file_checks_every_budgeted_file(root, capsys):
@@ -140,7 +145,22 @@ def test_changed_budgets_file_with_a_missing_file_names_it(root, capsys):
     budgets(root, '[budgets]\n"gone.md" = 12000\n')
     code, out, _ = run(capsys, ".token-budgets.toml")
     assert code == 1
-    assert out[0] == "gone.md: has a budget but is not a file. Rename or remove it."
+    assert out[0] == NOT_IN_GIT.format("gone.md")
+
+
+def test_budget_of_a_file_removed_from_git_fails(root, capsys):
+    def git(*args):
+        subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+
+    git("init", "-q")
+    write(root, "big.md", 40_000)
+    budgets(root, '[budgets]\n"big.md" = 10000\n')
+    git("add", "big.md", ".token-budgets.toml")
+    assert run(capsys, ".token-budgets.toml")[0] == 0
+    git("rm", "-q", "--cached", "big.md")
+    code, out, _ = run(capsys, ".token-budgets.toml")
+    assert code == 1
+    assert out[0] == NOT_IN_GIT.format("big.md")
 
 
 def test_budget_key_with_a_leading_dot_slash_applies(root, capsys):
