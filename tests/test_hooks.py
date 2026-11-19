@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -10,6 +11,7 @@ import pytest
 pytestmark = pytest.mark.integration
 
 HOOKS = Path(__file__).resolve().parents[1]
+FIXTURES = HOOKS / "tests" / "fixtures" / "typescript"
 
 
 @pytest.fixture(scope="module")
@@ -125,78 +127,13 @@ def test_crap_score_python_reads_a_real_coverage_report(repository, environment)
     assert "2 functions scored, 1 over the limit of 10" in result.stdout
 
 
-def istanbul(path, functions, hit_lines):
-    """Return an Istanbul coverage report with one statement per non-blank line."""
-    lines = path.read_text().splitlines()
-    numbered = [(n, text) for n, text in enumerate(lines, 1) if text.strip()]
-    statements = {
-        str(i): {
-            "start": {"line": n, "column": 0},
-            "end": {"line": n, "column": len(text)},
-        }
-        for i, (n, text) in enumerate(numbered)
-    }
-    spans = {
-        str(i): {
-            "name": name,
-            "line": first,
-            "decl": {
-                "start": {"line": first, "column": 0},
-                "end": {"line": last, "column": 1},
-            },
-            "loc": {
-                "start": {"line": first, "column": 0},
-                "end": {"line": last, "column": 1},
-            },
-        }
-        for i, (name, first, last) in enumerate(functions)
-    }
-    key = os.path.realpath(path)
-    return {
-        key: {
-            "path": key,
-            "statementMap": statements,
-            "s": {
-                i: int(span["start"]["line"] in hit_lines)
-                for i, span in statements.items()
-            },
-            "fnMap": spans,
-            "f": {i: int(span["line"] in hit_lines) for i, span in spans.items()},
-            "branchMap": {},
-            "b": {},
-        }
-    }
-
-
-def test_crap_score_typescript_runs_crap4ts_on_a_coverage_report(
-    repository, environment
-):
-    source = repository / "src" / "shapes.ts"
-    source.parent.mkdir()
-    source.write_text(
-        textwrap.dedent(
-            """
-            export function sides(kind: string): number {
-              if (kind === "triangle") {
-                return 3;
-              }
-              if (kind === "square") {
-                return 4;
-              }
-              return 0;
-            }
-
-            export function untested(a: boolean, b: boolean, c: boolean): number {
-              if (a && b) {
-                return 1;
-              }
-              return c ? 2 : 3;
-            }
-            """
-        ).lstrip()
-    )
+def test_crap_score_typescript_reads_a_recorded_report(repository, environment):
+    (repository / "src").mkdir()
+    for source in ("cases.ts", "legacy.js"):
+        shutil.copy(FIXTURES / source, repository / "src" / source)
+    document = json.loads((FIXTURES / "vitest-v8.json").read_text())
+    report = {str(repository / key): entry for key, entry in document.items()}
     (repository / "coverage").mkdir()
-    report = istanbul(source, [("sides", 1, 9), ("untested", 11, 16)], {1, 2, 5, 6, 9})
     (repository / "coverage" / "coverage-final.json").write_text(json.dumps(report))
     result = try_hook(
         repository,
@@ -207,5 +144,5 @@ def test_crap_score_typescript_runs_crap4ts_on_a_coverage_report(
         "manual",
     )
     assert result.returncode == 1, result.stdout + result.stderr
-    assert "untested" in result.stdout
-    assert "1 above threshold (10)" in result.stdout
+    assert "untestedBranchy" in result.stdout
+    assert "19 functions scored, 9 over the limit of 10" in result.stdout

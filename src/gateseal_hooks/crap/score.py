@@ -20,6 +20,12 @@ def crap(complexity: int, coverage: float) -> float:
     return complexity**2 * (1 - coverage) ** 3 + complexity
 
 
+def share(covered: int, statements: int, covered_branches: int, branches: int) -> float:
+    """Return the share of statements and branches covered; 1.0 when there are none."""
+    total = statements + branches
+    return 1.0 if total == 0 else (covered + covered_branches) / total
+
+
 def is_over(score: float, limit: float) -> bool:
     """Float error alone never puts a score equal to the limit over it."""
     return score > limit and not math.isclose(score, limit)

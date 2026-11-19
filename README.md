@@ -4,7 +4,7 @@ Plain [pre-commit](https://pre-commit.com) hooks, usable with or without [gatese
 | --- | --- | --- |
 | `token-budget` | a file is too large to read and review in one piece | at each commit |
 | `crap-score-python` | a Python function is both complex and poorly tested | in CI, after the tests |
-| `crap-score-typescript` | the same, for TypeScript | in CI, after the tests |
+| `crap-score-typescript` | the same, for TypeScript and JavaScript | in CI, after the tests |
 
 ## Use the hooks
 
@@ -20,7 +20,7 @@ repos:
         files: ^src/
 ```
 
-The Python hooks need Python 3.11 or later and no other package. `crap-score-typescript` needs Node.js 18 or later.
+Each hook needs Python 3.11 or later. `crap-score-typescript` also installs the tree-sitter parsers, the others need no other package.
 
 ## token-budget
 
@@ -71,20 +71,20 @@ Run coverage.py from the repository root, so the report names files the way pre-
 
 ## crap-score-typescript
 
-The hook runs [crap4ts](https://github.com/breezy-bays-labs/crap4ts) 1.0.1, a separate tool under the GPL-3.0 licence, which pre-commit installs from npm. It uses the same formula and the same limit of 10.
-
-Make a coverage report first. crap4ts reads `coverage/coverage-final.json` from Vitest, Jest or c8:
+The same check for TypeScript and JavaScript, with the same formula and limit. It reads the Istanbul JSON report that Vitest and Jest write, `coverage/coverage-final.json`:
 
 ```sh
 npx vitest run --coverage --coverage.reporter=json
 pre-commit run crap-score-typescript --hook-stage manual --all-files
 ```
 
-It scores every `.ts` and `.tsx` file it finds, and a function with no coverage scores 0%. It uses line coverage, because its branch mode counted untested functions as covered with c8 reports.
+Complexity is 1 plus each `if`, loop, `catch`, `case`, `? :`, `&&`, `||` and `??` in the function. Optional chaining such as `a?.b` does not count. Each named function is scored on its own: functions, methods, arrow functions in a variable, a class field or an object, and functions nested inside them. A callback without a name counts in the function around it. A function that the report says never ran scores 0%.
 
-crap4ts 1.0.1 has known gaps. It does not score a function nested inside another function. A generic arrow function such as `<T>(value: T) => value` in a `.ts` file stops the whole run with an error.
+The hook fails when a source file does not parse, or when the report has no data for a function. Leave test files out with `exclude`, as they are not in the report. c8 reports work, but count whole lines, so their scores are less exact than those from Vitest or Jest.
 
-**Options.** `--threshold 15` sets another limit. `--coverage path.json` reads another report.
+The parsers come from three pinned packages, which pre-commit installs with the hook. Nothing is downloaded when it runs.
+
+**Options.** `--coverage path.json` reads another report. `--limit 15` sets another limit.
 
 ## Mutation testing
 

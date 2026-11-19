@@ -28,8 +28,16 @@ dependencies = []
 Homepage = "https://github.com/karstenevers/gateseal-hooks"
 Issues = "https://github.com/karstenevers/gateseal-hooks/issues"
 
+[project.optional-dependencies]
+typescript = [
+    "tree-sitter==0.26.1",
+    "tree-sitter-javascript==0.25.0",
+    "tree-sitter-typescript==0.23.2",
+]
+
 [project.scripts]
 crap-score-python = "gateseal_hooks.crap.python:main"
+crap-score-typescript = "gateseal_hooks.crap.typescript:main"
 token-budget = "gateseal_hooks.token_budget:main"
 
 [dependency-groups]
@@ -39,6 +47,7 @@ dev = [
     "ruff==0.17.4",
     "pyright==1.1.414",
     "pre-commit==4.7.0",
+    "gateseal-hooks[typescript]",
 ]
 
 [tool.hatch.build.targets.wheel]

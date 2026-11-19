@@ -4,25 +4,24 @@ Coverage comes from coverage.py's JSON report with branch coverage, complexity
 from `ast`.
 """
 
-import argparse
 import ast
-import json
-import math
 import sys
 from collections.abc import Collection, Iterator
 from pathlib import Path
-from typing import cast
 
-from gateseal_hooks.crap.score import Score, crap, report
+from gateseal_hooks.crap.inputs import (
+    InputError,
+    arguments,
+    as_count,
+    as_list,
+    as_object,
+    load_json,
+)
+from gateseal_hooks.crap.score import Score, crap, report, share
 
 Definition = ast.FunctionDef | ast.AsyncFunctionDef
 
 SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-
-
-class InputError(Exception):
-    def __init__(self, path: str, detail: str) -> None:
-        super().__init__(f"{path}: {detail}")
 
 
 def decisions(node: ast.AST) -> int:
@@ -67,31 +66,6 @@ def own_nodes(function: Definition) -> Iterator[ast.AST]:
 
 def complexity(function: Definition) -> int:
     return 1 + sum(decisions(node) for node in own_nodes(function))
-
-
-def as_object(value: object, path: str, where: str) -> dict[str, object]:
-    if not isinstance(value, dict):
-        raise InputError(path, f"{where} is not a JSON object")
-    return cast(dict[str, object], value)
-
-
-def as_list(value: object, path: str, where: str) -> list[object]:
-    if not isinstance(value, list):
-        raise InputError(path, f"{where} is not a JSON array")
-    return cast(list[object], value)
-
-
-def as_count(value: object, path: str, where: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise InputError(path, f"{where} is not a count")
-    return value
-
-
-def load_json(path: str) -> object:
-    try:
-        return json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise InputError(path, f"cannot read JSON: {error}") from error
 
 
 def parse_source(path: str) -> dict[str, list[Definition]]:
@@ -182,12 +156,6 @@ def region_coverage(summary: dict[str, object], path: str, where: str) -> float:
     return share(covered, statements, covered_branches, branches)
 
 
-def share(covered: int, statements: int, covered_branches: int, branches: int) -> float:
-    """Return the share of statements and branches covered; 1.0 when there are none."""
-    total = statements + branches
-    return 1.0 if total == 0 else (covered + covered_branches) / total
-
-
 def score_file(
     file: str, entry: dict[str, object], report_path: str
 ) -> Iterator[Score]:
@@ -238,10 +206,10 @@ def name_scores(
         else lines_coverage(entry, own_lines(node), report_path, file)
         for node in found
     ]
-    for index, (node, share) in enumerate(zip(found, shares, strict=True), 1):
+    for index, (node, measured) in enumerate(zip(found, shares, strict=True), 1):
         count = complexity(node)
         key = name if index == 1 else f"{name}#{index}"
-        yield Score(file, key, crap(count, share), count, share)
+        yield Score(file, key, crap(count, measured), count, measured)
 
 
 def read_report(path: str, only: Collection[str] = ()) -> list[Score]:
@@ -269,30 +237,11 @@ def read_report(path: str, only: Collection[str] = ()) -> list[Score]:
     ]
 
 
-def finite(text: str) -> float:
-    value = float(text)
-    if not math.isfinite(value):
-        raise argparse.ArgumentTypeError(f"{text} is not a finite number")
-    return value
-
-
-def arguments(argv: list[str] | None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--coverage", default="coverage.json", help="coverage.py JSON report"
-    )
-    parser.add_argument("--limit", type=finite, default=10, help="highest passing")
-    parser.add_argument("files", nargs="*", help="score only these files")
-    return parser.parse_args(argv)
-
-
 def main(argv: list[str] | None = None) -> int:
-    options = arguments(argv)
+    options = arguments(argv, __doc__, default_coverage="coverage.json")
     try:
-        scores = read_report(
-            cast(str, options.coverage), cast(list[str], options.files)
-        )
+        scores = read_report(options.coverage, options.files)
     except InputError as error:
         print(f"crap-score-python: {error}", file=sys.stderr)
         return 1
-    return report(scores, cast(float, options.limit))
+    return report(scores, options.limit)

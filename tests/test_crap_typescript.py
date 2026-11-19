@@ -1,0 +1,394 @@
+"""crap-score-typescript on recorded reports and on small sources.
+
+The fixtures hold cases.ts and legacy.js, the test that ran them
+(cases.test.ts), and the coverage that Vitest 5.1.1 with V8 and with Istanbul,
+and c8 12.0.0 with the Node test runner, recorded for them.
+"""
+
+import json
+import shutil
+import textwrap
+from pathlib import Path
+
+import pytest
+
+from gateseal_hooks.crap import typescript
+
+FIXTURES = Path(__file__).parent / "fixtures" / "typescript"
+
+EXACT = [
+    ("src/cases.ts", "testedSimple", "1.00", 1, "100.0%"),
+    ("src/cases.ts", "untestedBranchy", "42.00", 6, "0.0%"),
+    ("src/cases.ts", "partlyTested", "3.79", 3, "55.6%"),
+    ("src/cases.ts", "outerWithNested", "2.00", 2, "100.0%"),
+    ("src/cases.ts", "outerWithNested.clamp", "3.79", 3, "55.6%"),
+    ("src/cases.ts", "outerWithUncalledCallback", "17.13", 5, "21.4%"),
+    ("src/cases.ts", "identity", "1.00", 1, "100.0%"),
+    ("src/cases.ts", "uncalledOneLiner", "6.00", 2, "0.0%"),
+    ("src/cases.ts", "calledOneLiner", "2.15", 2, "66.7%"),
+    ("src/cases.ts", "Account.deposit", "2.15", 2, "66.7%"),
+    ("src/cases.ts", "Account.withdraw", "30.00", 5, "0.0%"),
+    ("src/cases.ts", "Account.render", "12.00", 3, "0.0%"),
+    ("src/cases.ts", "handlers.onSave", "20.00", 4, "0.0%"),
+    ("src/cases.ts", "handlers.onLoad", "12.00", 3, "0.0%"),
+    ("src/cases.ts", "wrap", "1.00", 1, "100.0%"),
+    ("src/cases.ts", "wrapped", "20.00", 4, "0.0%"),
+    ("src/cases.ts", "default", "12.00", 3, "0.0%"),
+    ("src/legacy.js", "jsTested", "2.15", 2, "66.7%"),
+    ("src/legacy.js", "jsUntestedBranchy", "30.00", 5, "0.0%"),
+]
+# c8 counts whole lines and leaves out unnamed callbacks, so it is coarser.
+COARSE = {
+    "partlyTested": ("4.46", 3, "45.5%"),
+    "outerWithNested.clamp": ("4.46", 3, "45.5%"),
+    "outerWithUncalledCallback": ("9.96", 5, "41.7%"),
+    "calledOneLiner": ("2.50", 2, "50.0%"),
+    "Account.deposit": ("2.21", 2, "62.5%"),
+    "wrapped": ("14.72", 4, "12.5%"),
+    "jsTested": ("2.06", 2, "75.0%"),
+}
+
+
+@pytest.fixture
+def root(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
+def recorded(root, name):
+    """Copy the cases to root/src and return the report with absolute paths."""
+    (root / "src").mkdir()
+    for source in ("cases.ts", "legacy.js"):
+        shutil.copy(FIXTURES / source, root / "src" / source)
+    document = json.loads((FIXTURES / f"{name}.json").read_text())
+    report = root / "coverage-final.json"
+    absolute = {str(root / key): entry for key, entry in document.items()}
+    report.write_text(json.dumps(absolute))
+    return report
+
+
+def rows(scores):
+    return [
+        (s.file, s.function, f"{s.score:.2f}", s.complexity, f"{s.coverage:.1%}")
+        for s in scores
+    ]
+
+
+@pytest.mark.parametrize("name", ["vitest-v8", "vitest-istanbul"])
+def test_recorded_report_scores_every_case(root, name):
+    assert rows(typescript.read_report(str(recorded(root, name)))) == EXACT
+
+
+def test_c8_report_scores_every_case_more_coarsely(root):
+    expected = [
+        (file, name, *COARSE.get(name, (score, complexity, share)))
+        for file, name, score, complexity, share in EXACT
+    ]
+    assert rows(typescript.read_report(str(recorded(root, "c8")))) == expected
+
+
+def test_main_fails_on_the_cases_over_the_limit(root, capsys):
+    report = recorded(root, "vitest-v8")
+    code = typescript.main(["--coverage", str(report)])
+    out = capsys.readouterr().out.splitlines()
+    assert code == 1
+    assert [line.split()[1] for line in out[1:-1]] == [
+        "Account.render",
+        "Account.withdraw",
+        "default",
+        "handlers.onLoad",
+        "handlers.onSave",
+        "outerWithUncalledCallback",
+        "untestedBranchy",
+        "wrapped",
+        "jsUntestedBranchy",
+    ]
+    assert out[-1] == "19 functions scored, 9 over the limit of 10"
+
+
+def test_named_files_limit_the_scores(root):
+    report = recorded(root, "vitest-v8")
+    scores = typescript.read_report(str(report), ["src/legacy.js"])
+    assert [s.function for s in scores] == ["jsTested", "jsUntestedBranchy"]
+
+
+def write(root, name, source):
+    path = root / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(textwrap.dedent(source).lstrip())
+    return name
+
+
+def statement(line, column, hits):
+    return {"start": {"line": line, "column": column}}, hits
+
+
+def report_of(root, file, statements=(), functions=(), branches=()):
+    """Write an Istanbul report for file with the given statements and functions.
+
+    Each branch is (location, arm locations, arm counts).
+    """
+    entry = {
+        "statementMap": {str(i): s[0] for i, s in enumerate(statements)},
+        "s": {str(i): s[1] for i, s in enumerate(statements)},
+        "branchMap": {
+            str(i): {"loc": b[0], "locations": b[1]} for i, b in enumerate(branches)
+        },
+        "b": {str(i): b[2] for i, b in enumerate(branches)},
+        "fnMap": {str(i): {"loc": f[0]} for i, f in enumerate(functions)},
+        "f": {str(i): f[1] for i, f in enumerate(functions)},
+    }
+    report = root / "coverage-final.json"
+    report.write_text(json.dumps({str(root / file): entry}))
+    return str(report)
+
+
+def test_named_file_the_report_does_not_measure_fails(root):
+    report = report_of(root, write(root, "a.ts", "export const f = () => 1;\n"))
+    new = write(root, "b.ts", "export function g(): number {\n  return 1;\n}\n")
+    with pytest.raises(typescript.InputError, match="does not measure b.ts"):
+        typescript.read_report(report, ["a.ts", new])
+
+
+def test_named_file_without_functions_needs_no_coverage(root):
+    report = report_of(root, write(root, "a.ts", "export const x = 1;\n"))
+    types = write(root, "types.ts", "export interface Shape {\n  sides: number;\n}\n")
+    assert typescript.read_report(report, [types]) == []
+
+
+def test_source_that_does_not_parse_fails(root):
+    name = write(root, "broken.ts", "export function f(a: number) {\n  if (a > 0 {\n")
+    with pytest.raises(typescript.InputError, match="broken.ts: cannot parse"):
+        typescript.read_report(report_of(root, name))
+
+
+def test_function_without_data_in_the_report_fails(root):
+    name = write(root, "a.ts", "export const f = (x: number) => (x > 0 ? 1 : 2);\n")
+    with pytest.raises(typescript.InputError, match="has no data for f on a.ts line 1"):
+        typescript.read_report(report_of(root, name))
+
+
+def test_function_that_never_ran_scores_zero_although_its_line_ran(root):
+    name = write(root, "a.ts", "export const f = (x: number) => (x > 0 ? 1 : 2);\n")
+    report = report_of(root, name, [statement(1, 32, 1)], [(statement(1, 17, 0)[0], 0)])
+    assert rows(typescript.read_report(report)) == [("a.ts", "f", "6.00", 2, "0.0%")]
+
+
+ONE_LINER = "export const f = (x: number) => (x > 0 ? 1 : 2);\n"
+
+
+def test_function_that_ran_without_statements_of_its_own_is_covered(root):
+    name = write(root, "a.ts", "export const f = () => 1;\n")
+    report = report_of(root, name, functions=[(statement(1, 17, 1)[0], 1)])
+    assert rows(typescript.read_report(report)) == [("a.ts", "f", "1.00", 1, "100.0%")]
+
+
+def test_function_the_report_starts_earlier_on_its_line_is_matched(root):
+    name = write(root, "a.ts", "export function f(): number {\n  return 1;\n}\n")
+    report = report_of(
+        root, name, [statement(2, None, 1)], [(statement(1, 0, 0)[0], 0)]
+    )
+    assert rows(typescript.read_report(report)) == [("a.ts", "f", "2.00", 1, "0.0%")]
+
+
+def test_branch_arm_without_a_location_takes_the_branch_start(root):
+    name = write(root, "a.ts", ONE_LINER)
+    branch = (
+        {"start": {"line": 1, "column": 32}},
+        [{"start": {"line": None}}, {}],
+        [1, 0],
+    )
+    report = report_of(root, name, branches=[branch])
+    assert rows(typescript.read_report(report)) == [("a.ts", "f", "2.50", 2, "50.0%")]
+
+
+@pytest.mark.parametrize(
+    ("branch", "detail"),
+    [
+        (({"start": {"line": 1, "column": 32}}, [{}], [1, 0]), "has 2 counts"),
+        (({"start": {"line": 1, "column": "32"}}, [{}], [1]), "column is not a number"),
+    ],
+)
+def test_bad_branch_fails(root, branch, detail):
+    report = report_of(root, write(root, "a.ts", ONE_LINER), branches=[branch])
+    with pytest.raises(typescript.InputError, match=detail):
+        typescript.read_report(report)
+
+
+@pytest.mark.parametrize(
+    ("document", "detail"),
+    [
+        ([], "the report is not a JSON object"),
+        (
+            {"a.ts": {"statementMap": {"0": {"start": {"line": 1}}}, "s": {"0": -1}}},
+            "statementMap is not a count",
+        ),
+    ],
+)
+def test_report_of_the_wrong_shape_fails(root, document, detail):
+    write(root, "a.ts", "export const f = () => 1;\n")
+    (root / "report.json").write_text(json.dumps(document))
+    with pytest.raises(typescript.InputError, match=detail):
+        typescript.read_report("report.json")
+
+
+def test_source_the_report_names_but_that_is_missing_fails(root):
+    report = report_of(root, "gone.ts")
+    with pytest.raises(typescript.InputError, match="gone.ts: cannot read the source"):
+        typescript.read_report(report)
+
+
+def test_main_prints_an_input_error_and_fails(root, capsys):
+    code = typescript.main(["--coverage", "missing.json"])
+    assert code == 1
+    assert capsys.readouterr().err.startswith("crap-score-typescript: missing.json: ")
+
+
+def utf16(line, needle):
+    return len(line[: line.index(needle)].encode("utf-16-le")) // 2
+
+
+def test_columns_count_utf16_units_like_istanbul(root):
+    line = 'const s = "😀😀😀😀"; export const f = (x: number) => { return x; };'
+    name = write(root, "a.ts", line + "\n")
+    # The statement sits in f's parameters. In bytes f starts 8 columns later,
+    # so a byte column would leave the statement outside f.
+    report = report_of(
+        root,
+        name,
+        [statement(1, utf16(line, "x:"), 0)],
+        [(statement(1, utf16(line, "(x"), 1)[0], 1)],
+    )
+    assert rows(typescript.read_report(report)) == [("a.ts", "f", "2.00", 1, "0.0%")]
+
+
+def complexities(root, name, source):
+    write(root, name, source)
+    return {unit.name: unit.complexity for unit in typescript.parse(name)}
+
+
+COMPLEXITY = {
+    "generics in tsx": (
+        "generics.tsx",
+        """
+        export const first = <T,>(items: T[]): T | undefined =>
+          items.length > 0 ? items[0] : undefined;
+        export const load = async <T extends object>(read: () => Promise<T>) => {
+          try {
+            return await read();
+          } catch {
+            return null;
+          }
+        };
+        export function View({ items }: { items: string[] }) {
+          return <ul>{items.length > 0 && items.map((i) => (i ? <b>{i}</b> : 0))}</ul>;
+        }
+        """,
+        {"first": 2, "load": 2, "View": 3},
+    ),
+    "modern syntax": (
+        "modern.ts",
+        """
+        enum Color { Red, Green }
+        declare function ext(a: number): void;
+        function over(a: string): string;
+        function over(a: unknown): unknown { return a ?? 1; }
+        abstract class Base<const T extends readonly unknown[]> {
+          accessor count = 0;
+          static #secret = 1;
+          abstract run(): void;
+          @log() decorated(@inject() dep: A): void { if (dep) { c(); } }
+          static { if (Base.#secret > 0) { Base.#secret ||= 2; } }
+        }
+        const config = { port: 80 } satisfies Record<string, number>;
+        async function dispose() {
+          await using res = getRes();
+          for await (const x of res) { if (x) break; }
+        }
+        type Fn = <T>(x: T) => T extends string ? 1 : 2;
+        export const typed = <const T,>(x: T) => x;
+        """,
+        {"over": 2, "Base.decorated": 2, "dispose": 3, "typed": 1},
+    ),
+    "generators, getters, constructors and namespaces": (
+        "other.ts",
+        """
+        export function* walk(n: number): Generator<number> {
+          for (let i = 0; i < n; i++) {
+            if (i % 2 === 0 && i > 2) {
+              yield i;
+            }
+          }
+        }
+        var legacyVar = function (a: number) { return a > 1 || a < -1 ? 1 : 0; };
+        export default class Service {
+          static create(): Service { return new Service(); }
+          get size(): number { return this.items.length > 0 ? 1 : 0; }
+          set size(value: number) { this.items.length = value; }
+          constructor(private items: number[] = []) { if (items.length) { throw 1; } }
+        }
+        export namespace Tools { export function pick(a: number) { return a ? 1 : 2; } }
+        """,
+        {
+            "walk": 4,
+            "legacyVar": 3,
+            "Service.create": 1,
+            "Service.size": 2,
+            "Service.size#2": 1,
+            "Service.constructor": 2,
+            "Tools.pick": 2,
+        },
+    ),
+    "optional chaining is not a decision, ?? and ??= are": (
+        "chains.ts",
+        """
+        export function f(a?: { b?: { c?: number } }, d?: number) {
+          d ??= a?.b?.c ?? 0;
+          return d;
+        }
+        """,
+        {"f": 3},
+    ),
+    "each case is a decision, default is not": (
+        "switch.js",
+        """
+        export function pick(n) {
+          switch (n) {
+            case 1:
+              return "one";
+            case 2:
+              return "two";
+            default:
+              return "many";
+          }
+        }
+        """,
+        {"pick": 3},
+    ),
+    "a class field in JavaScript": (
+        "field.js",
+        """
+        export class Box {
+          open = (lid) => (lid ? 1 : 0);
+        }
+        """,
+        {"Box.open": 2},
+    ),
+    "a callback in a function joins it, a named inner function does not": (
+        "nested.ts",
+        """
+        export function outer(items: number[]) {
+          const inner = (n: number) => (n > 0 ? n : 0);
+          return items.map((n) => (n ? inner(n) : 0));
+        }
+        """,
+        {"outer": 2, "outer.inner": 2},
+    ),
+}
+
+
+@pytest.mark.parametrize(
+    ("name", "source", "expected"), COMPLEXITY.values(), ids=COMPLEXITY.keys()
+)
+def test_complexity(root, name, source, expected):
+    assert complexities(root, name, source) == expected
