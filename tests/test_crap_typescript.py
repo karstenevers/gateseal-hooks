@@ -282,6 +282,26 @@ def test_many_comments_after_export_parse_quickly(root):
     ]
 
 
+def test_field_function_of_a_class_c8_never_built_scores_zero(root):
+    source = """\
+        export class Widget {
+          handler = (x: number): number => {
+            if (x > 0) return 1;
+            return 2;
+          };
+        }
+        """
+    hits = [1, 1, 0, 0, 1, 1]
+    lines = [statement(line, 0, hit) for line, hit in enumerate(hits, 1)]
+    initializer = {"start": {"line": 2, "column": 2}, "end": {"line": 5, "column": 3}}
+    report = report_of(
+        root, write(root, "a.ts", source), lines, [(initializer, 0)], c8=True
+    )
+    assert rows(typescript.read_report(report)) == [
+        ("a.ts", "Widget.handler", "6.00", 2, "0.0%"),
+    ]
+
+
 def test_function_inside_one_that_never_ran_scores_zero(root):
     # c8 leaves nested out of fnMap and counts whole lines from column 0.
     source = """\

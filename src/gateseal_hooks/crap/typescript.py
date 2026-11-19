@@ -113,8 +113,9 @@ UNPARSED = (
 # A line counted from 1 and a column in UTF-16 units, as Istanbul counts them.
 Position = tuple[int, int]
 Hit = tuple[Position | None, int]
-# Where a function starts, whether at its start or else at its body, and its calls.
-Call = tuple[Position | None, bool, int]
+# Where a function's code starts and ends, whether it starts at the function's
+# start or else at its body, and its calls.
+Call = tuple[Position | None, Position | None, bool, int]
 
 
 @dataclass
@@ -277,18 +278,20 @@ def parse(file: str) -> list[Unit]:
     return units_of(tree.root_node, source.split(b"\n"))
 
 
-def start_of(value: object, path: str, where: str) -> Position | None:
-    """Return where an Istanbul location starts, or None for an empty one."""
-    start = as_object(value, path, where).get("start")
+def start_of(
+    value: object, path: str, where: str, edge: str = "start"
+) -> Position | None:
+    """Return where an Istanbul location starts or ends, or None for an empty one."""
+    start = as_object(value, path, where).get(edge)
     if start is None:
         return None
     start = as_object(start, path, where)
     if start.get("line") is None:
         return None
     line = as_count(start.get("line"), path, f"{where} line")
-    column = start.get("column", 0)
-    if column is None:
-        return line, 0
+    column = start.get("column")
+    if column is None:  # Istanbul writes no column for the end of a line
+        return line, 0 if edge == "start" else sys.maxsize
     if isinstance(column, bool) or not isinstance(column, int):
         raise InputError(path, f"{where} column is not a number")
     return line, max(column, 0)  # c8 writes -1 for the start of a line
@@ -362,8 +365,9 @@ def function_hits(entry: dict[str, object], path: str, file: str) -> Iterator[Ca
     for key, value in as_object(entry.get("fnMap"), path, where).items():
         function = as_object(value, path, where)
         at = start_of(function.get("loc"), path, where)
+        end = start_of(function.get("loc"), path, where, "end")
         starts = at == start_of(function.get("decl", {}), path, where)
-        yield at, starts, as_count(calls.get(key), path, f"{file} f")
+        yield at, end, starts, as_count(calls.get(key), path, f"{file} f")
 
 
 def tallies(
@@ -378,7 +382,7 @@ def tallies(
         if (unit := owner(units, at)) is not None:
             found[unit.name].branches += 1
             found[unit.name].covered_branches += count > 0
-    for at, starts, count in function_hits(entry, path, file):
+    for at, _, starts, count in function_hits(entry, path, file):
         if at is not None and (match := declared(units, at, starts)) is not None:
             found[match[0].name].call(at, match[1], count)
     return found
@@ -396,15 +400,24 @@ def coverage(unit: Unit, tally: Tally, path: str, file: str) -> float:
     )
 
 
-def never_ran(units: list[Unit], found: dict[str, Tally]) -> list[Unit]:
+def never_ran(
+    units: list[Unit], found: dict[str, Tally], idle: list[tuple[Position, Position]]
+) -> list[Unit]:
     """Return each unit the report says never ran.
 
-    Each function inside one also never ran, whatever its own lines say.
+    Each function inside one also never ran, whatever its own lines say, as
+    does each function in code the report says never ran, such as c8's
+    `<instance_members_initializer>` for a class no test built.
     """
     silent = [
         unit for unit in units if (calls := found[unit.name].calls) and not calls[1]
     ]
-    return [unit for unit in units if any(holds(outer, unit.start) for outer in silent)]
+    return [
+        unit
+        for unit in units
+        if any(holds(outer, unit.start) for outer in silent)
+        or any(start <= unit.start < end for start, end in idle)
+    ]
 
 
 def relative(name: str) -> str:
@@ -416,7 +429,12 @@ def file_scores(path: str, file: str, value: object) -> list[Score]:
     entry = as_object(value, path, file)
     found = tallies(units, entry, path, file)
     # c8 --all writes `"all": true` for a file the tests never loaded.
-    silent = units if entry.get("all") is True else never_ran(units, found)
+    idle = [
+        (at, end)
+        for at, end, _, count in function_hits(entry, path, file)
+        if at and end and not count
+    ]
+    silent = units if entry.get("all") is True else never_ran(units, found, idle)
     scores: list[Score] = []
     for unit in units:
         if unit in silent:
