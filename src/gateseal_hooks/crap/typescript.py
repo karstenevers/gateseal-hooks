@@ -49,9 +49,6 @@ FUNCTIONS = frozenset(
         "method_definition",
     }
 )
-EXPRESSIONS = frozenset(
-    {"function_expression", "function", "generator_function", "arrow_function"}
-)
 CLASSES = frozenset({"class_declaration", "abstract_class_declaration", "class"})
 NAMESPACES = frozenset({"internal_module", "module"})
 # A function in one of these is named after the field that holds it.
@@ -113,39 +110,33 @@ UNPARSED = (
 # A line counted from 1 and a column in UTF-16 units, as Istanbul counts them.
 Position = tuple[int, int]
 Hit = tuple[Position | None, int]
-# Where a function's code starts and ends, whether it starts at the function's
-# start or else at its body, and its calls.
-Call = tuple[Position | None, Position | None, bool, int]
 
 
-@dataclass
+@dataclass(eq=False)
 class Unit:
+    """A scored function and what the report counts in its code.
+
+    calls is None when the report lists none of the unit's functions.
+    """
+
     name: str
-    start: Position
-    body: Position
-    end: Position
-    expression: bool
+    line: int
     complexity: int = 1
-    # A computed method name, which runs where the method is defined.
-    key: tuple[Position, Position] | None = None
-
-
-@dataclass
-class Tally:
     statements: int = 0
     covered: int = 0
     branches: int = 0
     covered_branches: int = 0
-    calls: tuple[tuple[bool, Position], int] | None = None
+    calls: int | None = None
 
-    def call(self, at: Position, exact: bool, count: int) -> None:
-        """Keep the unit's own entry, else the earliest.
 
-        `function f(g = () => 1) {}` holds the callback's entry in f's signature.
-        """
-        rank = (not exact, at)
-        if self.calls is None or rank < self.calls[0]:
-            self.calls = (rank, count)
+@dataclass(frozen=True)
+class Span:
+    """Where a function starts, where its code starts and where it ends."""
+
+    start: Position
+    code: Position
+    end: Position
+    unit: Unit
 
 
 def text(node: Node | None) -> str | None:
@@ -168,15 +159,6 @@ def holder_name(node: Node, through_calls: bool) -> str | None:
             return None
         child, parent = parent, parent.parent
     return None
-
-
-def own_name(node: Node, enclosed: bool) -> str | None:
-    """Name a function; a callback inside a function has none and joins it."""
-    named = text(node.child_by_field_name("name"))
-    if named:
-        return named
-    holder = holder_name(node, through_calls=not enclosed)
-    return holder or (None if enclosed else "(anonymous)")
 
 
 def scope_name(node: Node) -> str | None:
@@ -204,59 +186,79 @@ def position(lines: list[bytes], point: tuple[int, int]) -> Position:
     return row + 1, len(prefix.decode("utf-8", "replace").encode("utf-16-le")) // 2
 
 
-def unwrapped(node: Node) -> Node:
-    """Vitest erases types first, so it starts the body of `() => <T>(x)` at x."""
-    while node.type in TRANSPARENT:
-        inner = [child for child in node.named_children if child.type != "comment"]
-        node = inner[-1] if node.type == "type_assertion" else inner[0]
-    return node
+def owner(spans: list[Span], at: Position | None, c8: bool = False) -> Span | None:
+    """Return the innermost function whose code holds at.
 
+    A function's code is its parameters and its body. Its first character is
+    not its code: there the code around it creates the function. Each
+    statement, branch, call count and decision belongs to the owner of its start.
 
-def computed_key(node: Node, lines: list[bytes]) -> tuple[Position, Position] | None:
-    key = node.child_by_field_name("name")
-    if key is None or key.type != "computed_property_name":
+    c8 starts a function's code at the function's first character.
+    """
+    if at is None:
         return None
-    return position(lines, key.start_point), position(lines, key.end_point)
+    inside = [
+        span
+        for span in spans
+        if (span.start <= at if c8 else span.code <= at != span.start) and at < span.end
+    ]
+    return max(inside, key=lambda span: span.start, default=None)
 
 
-def units_of(root: Node, lines: list[bytes]) -> list[Unit]:
-    """Return each named function in source order, named name#2 when repeated."""
-    units: list[Unit] = []
+def parameters(node: Node) -> Node | None:
+    """Return the parameters of a function, where its code starts."""
+    if node.type not in FUNCTIONS:
+        return None
+    return node.child_by_field_name("parameters") or node.child_by_field_name(
+        "parameter"
+    )
+
+
+def unit_of(
+    node: Node,
+    scope: tuple[str, ...],
+    around: Span | None,
+    seen: dict[str, int],
+    line: int,
+) -> tuple[Unit, tuple[str, ...]]:
+    """Return a function's unit and the scope of the names inside the function.
+
+    A function with a name gets a unit, named name#2 when the name repeats. A
+    function without a name inside another function shares that one's unit.
+    """
+    name = text(node.child_by_field_name("name")) or holder_name(
+        node, through_calls=around is None
+    )
+    if name is None and around is not None:
+        return around.unit, scope
+    scope = (*scope, name or "(anonymous)")
+    dotted = ".".join(scope)
+    seen[dotted] = seen.get(dotted, 0) + 1
+    numbered = dotted if seen[dotted] == 1 else f"{dotted}#{seen[dotted]}"
+    return Unit(numbered, line), scope
+
+
+def spans_of(root: Node, lines: list[bytes]) -> list[Span]:
+    """Return each function in source order, with each decision counted."""
+    spans: list[Span] = []
     seen: dict[str, int] = {}
-    stack: list[tuple[Node, tuple[str, ...], Unit | None]] = [(root, (), None)]
+    stack: list[tuple[Node, tuple[str, ...]]] = [(root, ())]
     while stack:
-        node, scope, unit = stack.pop()
-        outer = (scope, unit)
-        body = node.child_by_field_name("body") if node.type in FUNCTIONS else None
-        if body is not None:
-            name = own_name(node, enclosed=unit is not None)
-            if name is not None:
-                dotted = ".".join((*scope, name))
-                seen[dotted] = seen.get(dotted, 0) + 1
-                unit = Unit(
-                    dotted if seen[dotted] == 1 else f"{dotted}#{seen[dotted]}",
-                    position(lines, node.start_point),
-                    position(lines, unwrapped(body).start_point),
-                    position(lines, node.end_point),
-                    node.type in EXPRESSIONS,
-                    key=computed_key(node, lines),
-                )
-                units.append(unit)
-                scope = (*scope, name)
-        else:
-            named = scope_name(node)
-            if named:
-                scope = (*scope, named)
-            if unit is not None:
-                unit.complexity += decisions(node)
-        # A computed method name runs where the method is defined.
-        stack.extend(
-            (child, *outer)
-            if child.type == "computed_property_name"
-            else (child, scope, unit)
-            for child in reversed(node.children)
-        )
-    return units
+        node, scope = stack.pop()
+        code = parameters(node)
+        if code is not None:
+            start = position(lines, node.start_point)
+            unit, scope = unit_of(node, scope, owner(spans, start), seen, start[0])
+            end = position(lines, node.end_point)
+            spans.append(Span(start, position(lines, code.start_point), end, unit))
+        elif holder := scope_name(node):
+            scope = (*scope, holder)
+        elif decisions(node):
+            inside = owner(spans, position(lines, node.start_point))
+            if inside is not None:
+                inside.unit.complexity += 1
+        stack.extend((child, scope) for child in reversed(node.children))
+    return spans
 
 
 def blanked(match: re.Match[bytes]) -> bytes:
@@ -264,7 +266,7 @@ def blanked(match: re.Match[bytes]) -> bytes:
     return kept + re.sub(rb"[^\n]", b" ", match[1])
 
 
-def parse(file: str) -> list[Unit]:
+def parse(file: str) -> list[Span]:
     try:
         source = Path(file).read_bytes()
     except OSError as error:
@@ -278,7 +280,7 @@ def parse(file: str) -> list[Unit]:
         tree = parser.parse(parsed)
     if tree.root_node.has_error:
         raise InputError(file, "cannot parse the source with tree-sitter")
-    return units_of(tree.root_node, source.split(b"\n"))
+    return spans_of(tree.root_node, source.split(b"\n"))
 
 
 def start_of(
@@ -300,39 +302,6 @@ def start_of(
     return line, max(column, 0)  # c8 writes -1 for the start of a line
 
 
-def owner(
-    units: list[Unit], at: Position | None, statement: bool = False
-) -> Unit | None:
-    """Return the innermost unit that holds at.
-
-    A statement that starts where a function expression starts, such as the
-    return in `() => function f() {}`, runs in the code around it.
-    """
-    inside = [unit for unit in units if at and holds(unit, at, statement)]
-    return max(inside, key=lambda unit: unit.start, default=None)
-
-
-def holds(unit: Unit, at: Position, statement: bool = False) -> bool:
-    if not unit.start <= at < unit.end:
-        return False
-    if unit.key is not None and unit.key[0] <= at < unit.key[1]:
-        return False
-    return not (statement and unit.expression and at == unit.start)
-
-
-def declared(units: list[Unit], at: Position, starts: bool) -> tuple[Unit, bool] | None:
-    """Return the unit whose own entry this is, else the innermost signature holding it.
-
-    The signature of `function f(g = function h() {})` holds h.
-    """
-    for unit in units:
-        if at == (unit.start if starts else unit.body):
-            return unit, True
-    holding = [unit for unit in units if unit.start <= at <= unit.body]
-    inner = max(holding, key=lambda unit: unit.start, default=None)
-    return None if inner is None else (inner, False)
-
-
 def statement_hits(entry: dict[str, object], path: str, file: str) -> Iterator[Hit]:
     where = f"{file} statementMap"
     hits = as_object(entry.get("s"), path, f"{file} s")
@@ -341,6 +310,11 @@ def statement_hits(entry: dict[str, object], path: str, file: str) -> Iterator[H
 
 
 def branch_hits(entry: dict[str, object], path: str, file: str) -> Iterator[Hit]:
+    """Yield each arm's count at the start of its decision.
+
+    The arms of `c ? function a() {} : b` start in other functions, but the
+    decision is made where the branch starts.
+    """
     where = f"{file} branchMap"
     arms = as_object(entry.get("b"), path, f"{file} b")
     for key, value in as_object(entry.get("branchMap"), path, where).items():
@@ -349,81 +323,94 @@ def branch_hits(entry: dict[str, object], path: str, file: str) -> Iterator[Hit]
         locations = as_list(branch.get("locations"), path, where)
         if len(counts) != len(locations):
             raise InputError(path, f"{where} {key} has {len(counts)} counts")
-        # The arms of `c ? function a() {} : b` start in the functions, but
-        # the decision is made where the branch starts.
-        decision = start_of(branch.get("loc"), path, where)
-        for location, count in zip(locations, counts, strict=True):
-            at = decision or start_of(location, path, where)
+        starts = (
+            start_of(location, path, where)
+            for location in (branch.get("loc"), *locations)
+        )
+        at = next((start for start in starts if start), None)
+        for count in counts:
             yield at, as_count(count, path, where)
 
 
-def function_hits(entry: dict[str, object], path: str, file: str) -> Iterator[Call]:
-    """Istanbul starts a function at its body and its decl at its name.
-
-    c8 starts both at the function's start, so `() => function f() {}`'s body and
-    f start at the same place.
-    """
+def function_hits(
+    entry: dict[str, object], path: str, file: str
+) -> Iterator[tuple[Position | None, Position | None, int]]:
+    """Yield where each function's range starts and ends, and its calls."""
     where = f"{file} fnMap"
     calls = as_object(entry.get("f"), path, f"{file} f")
     for key, value in as_object(entry.get("fnMap"), path, where).items():
-        function = as_object(value, path, where)
-        at = start_of(function.get("loc"), path, where)
-        end = start_of(function.get("loc"), path, where, "end")
-        starts = at == start_of(function.get("decl", {}), path, where)
-        yield at, end, starts, as_count(calls.get(key), path, f"{file} f")
+        location = as_object(value, path, where).get("loc")
+        at = start_of(location, path, where)
+        end = start_of(location, path, where, "end")
+        yield at, end, as_count(calls.get(key), path, f"{file} f")
 
 
-def tallies(
-    units: list[Unit], entry: dict[str, object], path: str, file: str
-) -> dict[str, Tally]:
-    found = {unit.name: Tally() for unit in units}
+def tally(
+    spans: list[Span], entry: dict[str, object], path: str, file: str, c8: bool
+) -> None:
+    """Count each statement, branch and call of the report in its owner's unit."""
     for at, count in statement_hits(entry, path, file):
-        if (unit := owner(units, at, statement=True)) is not None:
-            found[unit.name].statements += 1
-            found[unit.name].covered += count > 0
+        if (span := owner(spans, at, c8)) is not None:
+            span.unit.statements += 1
+            span.unit.covered += count > 0
     for at, count in branch_hits(entry, path, file):
-        if (unit := owner(units, at)) is not None:
-            found[unit.name].branches += 1
-            found[unit.name].covered_branches += count > 0
-    for at, _, starts, count in function_hits(entry, path, file):
-        if at is not None and (match := declared(units, at, starts)) is not None:
-            found[match[0].name].call(at, match[1], count)
-    return found
+        if (span := owner(spans, at, c8)) is not None:
+            span.unit.branches += 1
+            span.unit.covered_branches += count > 0
+    for at, _, count in function_hits(entry, path, file):
+        if (span := owner(spans, at, c8)) is not None:
+            span.unit.calls = (span.unit.calls or 0) + count
 
 
-def coverage(unit: Unit, tally: Tally, path: str, file: str) -> float:
-    if tally.statements or tally.branches:
-        return share(
-            tally.covered, tally.statements, tally.covered_branches, tally.branches
-        )
-    if tally.calls is not None:
-        return 1.0
-    raise InputError(
-        path, f"has no data for {unit.name} on {file} line {unit.start[0]}"
-    )
-
-
-def never_ran(
-    units: list[Unit], found: dict[str, Tally], idle: list[tuple[Position, Position]]
-) -> list[Unit]:
-    """Return each unit the report says never ran.
-
-    Each function inside one also never ran, whatever its own lines say, as
-    does each function without calls of its own in code the report says never
-    ran, such as c8's `<instance_members_initializer>` for a class no test built.
-    """
-
-    def calls(unit: Unit) -> int | None:
-        tally = found[unit.name].calls
-        return None if tally is None else tally[1]
-
-    silent = [unit for unit in units if calls(unit) == 0]
+def idle_c8(
+    entry: dict[str, object], path: str, file: str
+) -> list[tuple[Position, Position]]:
+    """Return each range that a c8 report says never ran."""
     return [
-        unit
-        for unit in units
-        if any(holds(outer, unit.start) for outer in silent)
-        or (not calls(unit) and any(start <= unit.start < end for start, end in idle))
+        (at, end)
+        for at, end, count in function_hits(entry, path, file)
+        if at and end and not count
     ]
+
+
+def within(ranges: list[tuple[Position, Position]], at: Position) -> bool:
+    return any(start <= at < end for start, end in ranges)
+
+
+def never_ran_c8(
+    spans: list[Span], entry: dict[str, object], path: str, file: str
+) -> None:
+    """Set the calls of each function that a c8 report says never ran to 0.
+
+    c8 leaves a function inside one that never ran out of its report. It
+    reports a class that no test built as one range without calls, and a file
+    that no test loaded with `"all": true`.
+    """
+    idle = idle_c8(entry, path, file)
+    own = {id(span.unit): span for span in reversed(spans)}.values()
+    silent = [(span.start, span.end) for span in own if span.unit.calls == 0]
+    for span in own:
+        if (
+            entry.get("all") is True
+            or within(silent, span.start)
+            or (not span.unit.calls and within(idle, span.start))
+        ):
+            span.unit.calls = 0
+
+
+def coverage(unit: Unit, path: str, file: str) -> float:
+    """Return the share of the unit's statements and branches that ran.
+
+    A function that the report says never ran scores 0. One without statements
+    or branches, such as an empty function, scores 1 when it ran.
+    """
+    if unit.calls == 0:
+        return 0.0
+    if unit.calls is None and not unit.statements + unit.branches:
+        raise InputError(
+            path, f"has no data for {unit.name} on {file} line {unit.line}"
+        )
+    return share(unit.covered, unit.statements, unit.covered_branches, unit.branches)
 
 
 def relative(name: str) -> str:
@@ -431,22 +418,16 @@ def relative(name: str) -> str:
 
 
 def file_scores(path: str, file: str, value: object) -> list[Score]:
-    units = parse(file)
+    spans = parse(file)
     entry = as_object(value, path, file)
-    found = tallies(units, entry, path, file)
-    # c8 --all writes `"all": true` for a file the tests never loaded.
-    idle = [
-        (at, end)
-        for at, end, _, count in function_hits(entry, path, file)
-        if at and end and not count
-    ]
-    silent = units if entry.get("all") is True else never_ran(units, found, idle)
+    c8 = "all" in entry
+    tally(spans, entry, path, file, c8)
+    if c8:
+        never_ran_c8(spans, entry, path, file)
     scores: list[Score] = []
-    for unit in units:
-        if unit in silent:
-            measured = 0.0
-        else:
-            measured = coverage(unit, found[unit.name], path, file)
+    # A unit comes once for its function and once for each callback in it.
+    for unit in dict.fromkeys(span.unit for span in spans):
+        measured = coverage(unit, path, file)
         score = crap(unit.complexity, measured)
         scores.append(Score(file, unit.name, score, unit.complexity, measured))
     return scores

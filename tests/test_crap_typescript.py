@@ -105,11 +105,6 @@ V8 = {
     "unpack": ("1.02", 1, "71.4%"),
     "keyed": ("7.61", 3, "20.0%"),
 }
-# The scorer gives the `||` in choose to left, its first operand.
-KNOWN_WRONG = {
-    "choose": ("3.07", 3, "80.0%"),
-    "choose.left": ("1.04", 1, "66.7%"),
-}
 # c8 counts whole lines and leaves out unnamed callbacks, so it is coarser.
 COARSE = {
     "partlyTested": ("4.46", 3, "45.5%"),
@@ -155,7 +150,7 @@ def replaced(exact, other):
     ("name", "differs"), [("vitest-v8", V8), ("vitest-istanbul", {})]
 )
 def test_recorded_report_scores_every_case(root, name, differs):
-    expected = replaced(EXACT, differs | KNOWN_WRONG)
+    expected = replaced(EXACT, differs)
     assert rows(typescript.read_report(str(recorded(root, name)))) == expected
 
 
@@ -203,8 +198,8 @@ def statement(line, column, hits):
 def report_of(root, file, statements=(), functions=(), branches=(), c8=False, **extra):
     """Write an Istanbul report for file with the given statements and functions.
 
-    Each branch is (location, arm locations, arm counts). c8 writes each
-    function's decl the same as its loc.
+    Each branch is (location, arm locations, arm counts). c8 writes "all" in
+    each file's entry.
     """
     entry = {
         "statementMap": {str(i): s[0] for i, s in enumerate(statements)},
@@ -213,11 +208,9 @@ def report_of(root, file, statements=(), functions=(), branches=(), c8=False, **
             str(i): {"loc": b[0], "locations": b[1]} for i, b in enumerate(branches)
         },
         "b": {str(i): b[2] for i, b in enumerate(branches)},
-        "fnMap": {
-            str(i): {"loc": f[0], **({"decl": f[0]} if c8 else {})}
-            for i, f in enumerate(functions)
-        },
+        "fnMap": {str(i): {"loc": f[0]} for i, f in enumerate(functions)},
         "f": {str(i): f[1] for i, f in enumerate(functions)},
+        **({"all": False} if c8 else {}),
         **extra,
     }
     report = root / "coverage-final.json"
@@ -286,9 +279,7 @@ def test_c8_entry_where_a_function_starts_an_arrow_body_is_its_own(root):
 
 def test_many_comments_after_export_parse_quickly(root):
     source = "export " + "/* c */ " * 40 + "function f() {\n  return 1;\n}\n"
-    assert [unit.name for unit in typescript.parse(write(root, "a.ts", source))] == [
-        "f"
-    ]
+    assert names(typescript.parse(write(root, "a.ts", source))) == ["f"]
 
 
 def test_field_function_of_a_class_c8_never_built_scores_zero(root):
@@ -333,6 +324,10 @@ def test_method_c8_saw_called_inside_a_never_built_class_keeps_its_calls(root):
     ]
 
 
+def names(spans):
+    return [unit.name for unit in dict.fromkeys(span.unit for span in spans)]
+
+
 def test_source_the_grammar_parses_is_not_rewritten(root):
     source = 'const s = "for (await /*";\nconst t = "*/ using x of y";\n'
     assert typescript.parse(write(root, "a.ts", source)) == []
@@ -348,10 +343,22 @@ def test_function_inside_one_that_never_ran_scores_zero(root):
         """
     lines = [statement(line, 0, 0) for line in (1, 2, 3, 4)]
     calls = [(statement(1, 7, 0)[0], 0)]
-    report = report_of(root, write(root, "a.ts", source), lines, calls)
+    report = report_of(root, write(root, "a.ts", source), lines, calls, c8=True)
     assert rows(typescript.read_report(report)) == [
         ("a.ts", "outer", "2.00", 1, "0.0%"),
         ("a.ts", "outer.nested", "2.00", 1, "0.0%"),
+    ]
+
+
+def test_exact_positions_as_jest_writes_them_follow_the_same_rule(root):
+    # Vitest never reports a hit where an arrow starts, Jest does: the
+    # statement that creates thunk, then the one that returns the inner arrow.
+    source = "export const thunk = () => () => 1;\n"
+    lines = [statement(1, 21, 1), statement(1, 27, 1), statement(1, 33, 0)]
+    calls = [(statement(1, 27, 0)[0], 1), (statement(1, 33, 0)[0], 0)]
+    report = report_of(root, write(root, "a.ts", source), lines, calls)
+    assert rows(typescript.read_report(report)) == [
+        ("a.ts", "thunk", "1.12", 1, "50.0%")
     ]
 
 
@@ -361,18 +368,23 @@ def test_absolute_file_name_matches_the_report(root):
     assert len(typescript.read_report(report, [str(root / name)])) == 1
 
 
-def test_branch_without_a_location_counts_its_arms(root):
+def test_branch_without_a_location_counts_at_its_first_arm(root):
+    # A statement without a location is in no function.
     source = "export function f(x: number): number {\n  return x > 0 ? 1 : 2;\n}\n"
     arms = [{"start": {"line": 2, "column": None}}, {"start": {"line": None}}]
-    report = report_of(root, write(root, "a.ts", source), branches=[({}, arms, [1, 0])])
-    assert rows(typescript.read_report(report)) == [("a.ts", "f", "2.00", 2, "100.0%")]
+    name = write(root, "a.ts", source)
+    report = report_of(root, name, [({}, 1)], branches=[({}, arms, [1, 0])])
+    assert rows(typescript.read_report(report)) == [("a.ts", "f", "2.50", 2, "50.0%")]
 
 
 def test_blanked_syntax_keeps_utf16_columns(root):
     line = "export async function f(xs: AsyncDisposable[]) {"
     line += " for (await /* é */ using x of xs) {} const g = () => 1; return g; }"
-    units = typescript.parse(write(root, "a.ts", line + "\n"))
-    assert [(u.name, u.start) for u in units][1] == ("f.g", (1, utf16(line, "() =>")))
+    spans = typescript.parse(write(root, "a.ts", line + "\n"))
+    assert [(s.unit.name, s.start) for s in spans] == [
+        ("f", (1, utf16(line, "async"))),
+        ("f.g", (1, utf16(line, "() =>"))),
+    ]
 
 
 @pytest.mark.parametrize(
@@ -439,7 +451,7 @@ def utf16(line, needle):
 
 def complexities(root, name, source):
     write(root, name, source)
-    return {unit.name: unit.complexity for unit in typescript.parse(name)}
+    return {span.unit.name: span.unit.complexity for span in typescript.parse(name)}
 
 
 COMPLEXITY = {
