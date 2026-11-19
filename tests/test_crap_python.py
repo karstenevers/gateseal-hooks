@@ -311,6 +311,20 @@ COMPLEXITY = {
         "def f():\n    return lambda x: x or 1\n",
         {"f": 2},
     ),
+    "nested defaults and class bases count where they run": (
+        """
+        def f(x):
+            def g(a=1 if x else 2, *, b=x or 3):
+                if a:
+                    pass
+
+            class C(A if x else B):
+                pass
+
+            return g, C
+        """,
+        {"f": 4, "f.g": 2},
+    ),
     "nested def and class count on their own": (
         """
         def f(x):

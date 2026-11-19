@@ -45,11 +45,21 @@ def decisions(node: ast.AST) -> int:
             return 0
 
 
+def definition_time(scope: Definition | ast.ClassDef) -> list[ast.expr]:
+    """Return the parts of a nested def or class that the enclosing code runs."""
+    if isinstance(scope, ast.ClassDef):
+        keywords = [keyword.value for keyword in scope.keywords]
+        return [*scope.decorator_list, *scope.bases, *keywords]
+    defaults = [default for default in scope.args.kw_defaults if default]
+    return [*scope.decorator_list, *scope.args.defaults, *defaults]
+
+
 def own_nodes(function: Definition) -> Iterator[ast.AST]:
     stack: list[ast.AST] = list(function.body)
     while stack:
         node = stack.pop()
         if isinstance(node, SCOPES):
+            stack.extend(definition_time(node))
             continue
         yield node
         stack.extend(ast.iter_child_nodes(node))

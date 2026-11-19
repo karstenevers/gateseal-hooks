@@ -149,6 +149,12 @@ def test_budget_key_with_a_leading_dot_slash_applies(root, capsys):
     assert run(capsys, name) == (0, [], "")
 
 
+def test_file_argument_with_a_leading_dot_slash_finds_its_budget(root, capsys):
+    write(root, "big.md", 48_000)
+    budgets(root, '[budgets]\n"big.md" = 12000\n')
+    assert run(capsys, "./big.md") == (0, [], "")
+
+
 def test_budgets_option_names_the_file(root, capsys):
     name = write(root, "big.md", 48_000)
     (root / "limits.toml").write_text('[budgets]\n"big.md" = 12000\n')

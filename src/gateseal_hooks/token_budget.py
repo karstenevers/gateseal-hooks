@@ -155,7 +155,7 @@ def main(argv: list[str] | None = None) -> int:
     options = arguments(argv)
     cap = cast(int, options.cap)
     budgets_path = cast(Path, options.budgets)
-    files = cast(list[str], options.files)
+    files = [Path(file).as_posix() for file in cast(list[str], options.files)]
     try:
         budgets = load_budgets(budgets_path)
     except InputError as error:
