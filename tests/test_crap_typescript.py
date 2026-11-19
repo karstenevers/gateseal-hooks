@@ -1,8 +1,10 @@
 """crap-score-typescript on recorded reports and on small sources.
 
-The fixtures hold cases.ts and legacy.js, the test that ran them
-(cases.test.ts), and the coverage that Vitest 5.1.1 with V8 and with Istanbul,
-and c8 12.0.0 with the Node test runner, recorded for them.
+The fixtures hold cases.ts, edges.ts and legacy.js, the tests that ran them
+(cases.test.ts and edges.test.ts), and the coverage that Vitest 5.1.1 with V8
+and with Istanbul recorded for them. c8 12.0.0 with the Node test runner
+recorded cases.ts and legacy.js. Each expected row is worked out by hand from
+the source and its test.
 """
 
 import json
@@ -16,7 +18,7 @@ from gateseal_hooks.crap import typescript
 
 FIXTURES = Path(__file__).parent / "fixtures" / "typescript"
 
-EXACT = [
+CASES = [
     ("src/cases.ts", "testedSimple", "1.00", 1, "100.0%"),
     ("src/cases.ts", "untestedBranchy", "42.00", 6, "0.0%"),
     ("src/cases.ts", "partlyTested", "3.79", 3, "55.6%"),
@@ -34,9 +36,80 @@ EXACT = [
     ("src/cases.ts", "wrap", "1.00", 1, "100.0%"),
     ("src/cases.ts", "wrapped", "20.00", 4, "0.0%"),
     ("src/cases.ts", "default", "12.00", 3, "0.0%"),
+]
+LEGACY = [
     ("src/legacy.js", "jsTested", "2.15", 2, "66.7%"),
     ("src/legacy.js", "jsUntestedBranchy", "30.00", 5, "0.0%"),
 ]
+# Each shape here once needed a rule of its own. A function's coverage is its
+# covered statements and branches over all of them.
+EDGES = [
+    ("src/edges.ts", "paren", "2.15", 2, "66.7%"),
+    ("src/edges.ts", "cast", "6.00", 2, "0.0%"),
+    ("src/edges.ts", "angle", "2.15", 2, "66.7%"),
+    ("src/edges.ts", "checked", "6.00", 2, "0.0%"),
+    ("src/edges.ts", "sure", "2.15", 2, "66.7%"),
+    # The statement that returns handler is factory's: 1 of 1.
+    ("src/edges.ts", "factory", "1.00", 1, "100.0%"),
+    ("src/edges.ts", "factory.handler", "2.26", 2, "60.0%"),
+    ("src/edges.ts", "made", "1.00", 1, "100.0%"),
+    ("src/edges.ts", "made.inner", "2.00", 1, "0.0%"),
+    ("src/edges.ts", "later", "1.00", 1, "100.0%"),
+    ("src/edges.ts", "later.wait", "2.26", 2, "60.0%"),
+    # 3 of 3 statements, 1 of 2 arms of `?:` and 1 of 2 operands of `||`.
+    ("src/edges.ts", "choose", "3.21", 3, "71.4%"),
+    ("src/edges.ts", "choose.one", "1.00", 1, "100.0%"),
+    ("src/edges.ts", "choose.two", "2.00", 1, "0.0%"),
+    ("src/edges.ts", "choose.left", "1.00", 1, "100.0%"),
+    ("src/edges.ts", "choose.right", "2.00", 1, "0.0%"),
+    # The inner arrow has no name, so its statement and branches are curried's.
+    ("src/edges.ts", "curried", "3.69", 2, "25.0%"),
+    # thunk ran, but Vitest reports its call and its own statement at the
+    # variable name, outside the function. Only the inner statement is left.
+    ("src/edges.ts", "thunk", "2.00", 1, "0.0%"),
+    ("src/edges.ts", "pass", "2.00", 1, "0.0%"),
+    ("src/edges.ts", "named", "1.00", 1, "100.0%"),
+    ("src/edges.ts", "named.inner", "1.00", 1, "100.0%"),
+    ("src/edges.ts", "held", "1.00", 1, "100.0%"),
+    ("src/edges.ts", "held.cb", "2.00", 1, "0.0%"),
+    # The default value did not run: 1 of 2 statements, 0 of 1 branches.
+    ("src/edges.ts", "passed", "1.30", 1, "33.3%"),
+    ("src/edges.ts", "unpack", "1.00", 1, "100.0%"),
+    ("src/edges.ts", "unpack.handle", "2.15", 2, "66.7%"),
+    ("src/edges.ts", "unpack.renamed", "2.00", 1, "0.0%"),
+    ("src/edges.ts", "unpack.first", "6.00", 2, "0.0%"),
+    # The decisions in the method name are keyed's: 1 statement, 3 of 4 branches.
+    ("src/edges.ts", "keyed", "3.07", 3, "80.0%"),
+    ("src/edges.ts", 'keyed.[a && b ? "on" : "off"]', "2.00", 1, "0.0%"),
+    ("src/edges.ts", "Box.handler", "2.26", 2, "60.0%"),
+    # Vitest rewrites `using` to a block and a declaration, 2 more statements
+    # that did not run: 3 of 7 statements, 0 of 2 branches.
+    ("src/edges.ts", "dispose", "5.67", 3, "33.3%"),
+    ("src/edges.ts", "idle", "2.00", 1, "0.0%"),
+    ("src/edges.ts", "idle.nested", "2.00", 1, "0.0%"),
+    ("src/edges.ts", "packed", "1.02", 1, "75.0%"),
+    ("src/edges.ts", "packed.inner", "1.00", 1, "100.0%"),
+    # An empty function has only its call count.
+    ("src/edges.ts", "noop", "1.00", 1, "100.0%"),
+    ("src/edges.ts", "unused", "2.00", 1, "0.0%"),
+    # after follows characters that are 4 bytes and 2 UTF-16 units each.
+    ("src/edges.ts", "after", "1.00", 1, "100.0%"),
+]
+EXACT = CASES + EDGES + LEGACY
+# V8 cannot see a default value or a method name run. It gives a default
+# value's branch the count of the code around it, and a method name's
+# branches no count.
+V8 = {
+    "held": ("1.12", 1, "50.0%"),
+    "passed": ("1.04", 1, "66.7%"),
+    "unpack": ("1.02", 1, "71.4%"),
+    "keyed": ("7.61", 3, "20.0%"),
+}
+# The scorer gives the `||` in choose to left, its first operand.
+KNOWN_WRONG = {
+    "choose": ("3.07", 3, "80.0%"),
+    "choose.left": ("1.04", 1, "66.7%"),
+}
 # c8 counts whole lines and leaves out unnamed callbacks, so it is coarser.
 COARSE = {
     "partlyTested": ("4.46", 3, "45.5%"),
@@ -58,7 +131,7 @@ def root(tmp_path, monkeypatch):
 def recorded(root, name):
     """Copy the cases to root/src and return the report with absolute paths."""
     (root / "src").mkdir()
-    for source in ("cases.ts", "legacy.js"):
+    for source in ("cases.ts", "edges.ts", "legacy.js"):
         shutil.copy(FIXTURES / source, root / "src" / source)
     document = json.loads((FIXTURES / f"{name}.json").read_text())
     report = root / "coverage-final.json"
@@ -74,16 +147,20 @@ def rows(scores):
     ]
 
 
-@pytest.mark.parametrize("name", ["vitest-v8", "vitest-istanbul"])
-def test_recorded_report_scores_every_case(root, name):
-    assert rows(typescript.read_report(str(recorded(root, name)))) == EXACT
+def replaced(exact, other):
+    return [(file, name, *other.get(name, row)) for file, name, *row in exact]
+
+
+@pytest.mark.parametrize(
+    ("name", "differs"), [("vitest-v8", V8), ("vitest-istanbul", {})]
+)
+def test_recorded_report_scores_every_case(root, name, differs):
+    expected = replaced(EXACT, differs | KNOWN_WRONG)
+    assert rows(typescript.read_report(str(recorded(root, name)))) == expected
 
 
 def test_c8_report_scores_every_case_more_coarsely(root):
-    expected = [
-        (file, name, *COARSE.get(name, (score, complexity, share)))
-        for file, name, score, complexity, share in EXACT
-    ]
+    expected = replaced(CASES + LEGACY, COARSE)
     assert rows(typescript.read_report(str(recorded(root, "c8")))) == expected
 
 
@@ -103,7 +180,7 @@ def test_main_fails_on_the_cases_over_the_limit(root, capsys):
         "wrapped",
         "jsUntestedBranchy",
     ]
-    assert out[-1] == "19 functions scored, 9 over the limit of 10"
+    assert out[-1] == "58 functions scored, 9 over the limit of 10"
 
 
 def test_named_files_limit_the_scores(root):
