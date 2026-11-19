@@ -31,6 +31,7 @@ def repository(tmp_path, environment):
     git("init", "-q")
     git("config", "user.email", "test@example.com")
     git("config", "user.name", "test")
+    git("config", "commit.gpgsign", "false")
     return tmp_path
 
 
