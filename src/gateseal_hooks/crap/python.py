@@ -9,6 +9,7 @@ import sys
 from collections.abc import Collection, Iterator
 from pathlib import Path
 
+from gateseal_hooks.crap.baseline import load_baseline
 from gateseal_hooks.crap.inputs import (
     InputError,
     arguments,
@@ -238,7 +239,9 @@ def main(argv: list[str] | None = None) -> int:
     options = arguments(argv, __doc__, default_coverage="coverage.json")
     try:
         scores = read_report(options.coverage, options.files)
+        baseline = load_baseline(options.baseline)
     except InputError as error:
         print(f"crap-score-python: {error}", file=sys.stderr)
         return 1
-    return report(scores, options.limit)
+    findings = baseline.findings(scores, options.limit)
+    return report(scores, options.limit, baseline.allows, findings)

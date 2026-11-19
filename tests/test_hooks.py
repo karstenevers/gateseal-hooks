@@ -147,3 +147,65 @@ def test_crap_score_typescript_reads_a_recorded_report(repository, environment):
     assert result.returncode == 1, result.stdout + result.stderr
     assert "untestedBranchy" in result.stdout
     assert "19 functions scored, 9 over the limit of 10" in result.stdout
+
+
+def test_crap_score_python_fails_a_range_that_adds_a_baseline_entry(
+    repository, environment
+):
+    def git(*arguments):
+        return subprocess.run(
+            ["git", *arguments],
+            cwd=repository,
+            env=environment,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    shapes = repository / "shapes.py"
+    shapes.write_text("def tested(a):\n    return a\n")
+    (repository / "drive.py").write_text("from shapes import tested\n\ntested(1)\n")
+    (repository / ".crap-baseline.toml").write_text("[baseline]\n")
+    git("add", "-A")
+    git("commit", "-q", "-m", "base")
+    base = git("rev-parse", "HEAD")
+    shapes.write_text(
+        shapes.read_text()
+        + "\n\ndef untested(a, b, c):\n    if a and b:\n        return 1\n"
+        + "    return 2 if c else 3\n"
+    )
+    (repository / ".crap-baseline.toml").write_text(
+        '[baseline."shapes.py"]\nuntested = 20\n'
+    )
+    for command in (
+        ["run", "--branch", "--source", ".", "drive.py"],
+        ["json", "-o", "coverage.json"],
+    ):
+        subprocess.run(
+            [sys.executable, "-m", "coverage", *command],
+            cwd=repository,
+            env=environment,
+            check=True,
+            capture_output=True,
+        )
+    git("add", "-A")
+    git("commit", "-q", "-m", "change")
+    result = try_hook(
+        repository,
+        environment,
+        "crap-score-python",
+        "--from-ref",
+        base,
+        "--to-ref",
+        "HEAD",
+        "--hook-stage",
+        "manual",
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert (
+        "shapes.py untested: a change may not add an entry to .crap-baseline.toml."
+        in result.stdout
+    )
+    assert "2 functions scored, 0 over the limit of 10, 1 on the baseline" in (
+        result.stdout
+    )

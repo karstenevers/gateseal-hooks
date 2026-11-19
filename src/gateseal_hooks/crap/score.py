@@ -4,6 +4,7 @@ CRAP = complexity² × (1 − coverage)³ + complexity, per function.
 """
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 
 
@@ -53,13 +54,28 @@ def table(scores: list[Score]) -> list[str]:
     ]
 
 
-def report(scores: list[Score], limit: float) -> int:
-    """Print each score over the limit and a summary; return the exit code."""
+def report(
+    scores: list[Score],
+    limit: float,
+    allows: Callable[[Score], bool],
+    findings: list[str],
+) -> int:
+    """Print each score over the limit that allows refuses, findings and a summary.
+
+    Return the exit code.
+    """
     over = sorted(
         (score for score in scores if is_over(score.score, limit)),
         key=lambda score: (score.file, score.function),
     )
-    if over:
-        print("\n".join(table(over)))
-    print(f"{len(scores)} functions scored, {len(over)} over the limit of {limit:g}")
-    return 1 if over else 0
+    failing = [score for score in over if not allows(score)]
+    if failing:
+        print("\n".join(table(failing)))
+    for finding in findings:
+        print(finding)
+    allowed = len(over) - len(failing)
+    print(
+        f"{len(scores)} functions scored, {len(failing)} over the limit of {limit:g}"
+        + (f", {allowed} on the baseline" if allowed else "")
+    )
+    return 1 if failing or findings else 0
