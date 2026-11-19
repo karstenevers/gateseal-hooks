@@ -131,7 +131,7 @@ class Unit:
 
 @dataclass(frozen=True)
 class Span:
-    """Where a function starts, where its code starts and where it ends."""
+    """Where a function starts, where its code starts and where its body ends."""
 
     start: Position
     code: Position
@@ -230,6 +230,17 @@ def parameters(node: Node) -> Node | None:
     )
 
 
+def body(node: Node) -> Node:
+    """Return the body of a function without the parentheses around it.
+
+    Istanbul ends a function there, before a `)` that closes the body.
+    """
+    inner = node.child_by_field_name("body") or node
+    while inner.type == "parenthesized_expression" and inner.named_child_count == 1:
+        inner = inner.named_children[0]
+    return inner
+
+
 def unit_of(
     node: Node, scope: tuple[str, ...], around: Span | None, seen: dict[str, int]
 ) -> tuple[Unit, tuple[str, ...]]:
@@ -263,7 +274,8 @@ def spans_of(root: Node, source: bytes) -> list[Span]:
         if code is not None:
             start = at(node.start_byte)
             unit, scope = unit_of(node, scope, owner(spans, start), seen)
-            spans.append(Span(start, at(code.start_byte), at(node.end_byte), unit))
+            end = at(body(node).end_byte)
+            spans.append(Span(start, at(code.start_byte), end, unit))
         elif holder := scope_name(node):
             scope = (*scope, holder)
         elif decisions(node):

@@ -78,5 +78,11 @@ export function unused(): void {}
 
 export const wide = "😀😀😀😀😀😀😀😀😀😀"; export const after = (x: number) => x;
 
+export const shell = () => (
+  function core(a: boolean, b: boolean) {
+    return a && b ? 1 : 2;
+  }
+);
+
 export const split =
   () => (x: number) => (x ? 1 : x ? 2 : 3);
