@@ -92,7 +92,7 @@ def load_budgets(path: Path) -> dict[str, int]:
     for name, value in cast(dict[str, object], table).items():
         if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
             raise InputError(f"{path}: the budget of {name} is not a positive number")
-        budgets[name] = value
+        budgets[Path(name).as_posix()] = value
     return budgets
 
 

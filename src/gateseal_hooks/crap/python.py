@@ -7,6 +7,7 @@ from `ast`.
 import argparse
 import ast
 import json
+import math
 import sys
 from collections.abc import Collection, Iterator
 from pathlib import Path
@@ -258,12 +259,19 @@ def read_report(path: str, only: Collection[str] = ()) -> list[Score]:
     ]
 
 
+def finite(text: str) -> float:
+    value = float(text)
+    if not math.isfinite(value):
+        raise argparse.ArgumentTypeError(f"{text} is not a finite number")
+    return value
+
+
 def arguments(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--coverage", default="coverage.json", help="coverage.py JSON report"
     )
-    parser.add_argument("--limit", type=float, default=10, help="highest passing")
+    parser.add_argument("--limit", type=finite, default=10, help="highest passing")
     parser.add_argument("files", nargs="*", help="score only these files")
     return parser.parse_args(argv)
 

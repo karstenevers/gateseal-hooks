@@ -114,6 +114,14 @@ def test_report_without_start_line_names_the_coverage_version(root, capsys):
     assert "coverage.py 7.13.1+" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("limit", ["nan", "inf"])
+def test_limit_that_is_not_a_finite_number_is_refused(root, limit):
+    report = project(root, {"m.py": branchy("f", 1)})
+    with pytest.raises(SystemExit) as refused:
+        crap.main(arguments(report, limit))
+    assert refused.value.code == 2
+
+
 def test_coverage_counts_statements_and_branches(root, capsys):
     report = project(root, {"m.py": branchy("f", 5)}, {"f": (1, 2, 0, 2)})
     code, rows, _ = check(capsys, report)

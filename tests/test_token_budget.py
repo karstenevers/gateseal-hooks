@@ -143,6 +143,12 @@ def test_changed_budgets_file_with_a_missing_file_names_it(root, capsys):
     assert out[0] == "gone.md: has a budget but is not a file. Rename or remove it."
 
 
+def test_budget_key_with_a_leading_dot_slash_applies(root, capsys):
+    name = write(root, "big.md", 48_000)
+    budgets(root, '[budgets]\n"./big.md" = 12000\n')
+    assert run(capsys, name) == (0, [], "")
+
+
 def test_budgets_option_names_the_file(root, capsys):
     name = write(root, "big.md", 48_000)
     (root / "limits.toml").write_text('[budgets]\n"big.md" = 12000\n')
