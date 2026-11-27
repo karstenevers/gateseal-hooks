@@ -54,7 +54,9 @@ def bases(path: str, start: str) -> list[str]:
     In a range, that is its start. At a push, they are the commits that the
     remote already has and the pushed commits build on, so entries that a
     rebase or a merge brings from another branch are not new, and neither are
-    those of a rewritten branch's old tip.
+    those of a rewritten branch's old tip. The remote's tip of the pushed
+    branch is start, so its tracking ref, which may be stale, is no base. A
+    push of commits that the remote already has builds on its own end.
     """
     if git("rev-parse", "--verify", "--quiet", f"{start}^{{commit}}").returncode:
         raise InputError(path, f"PRE_COMMIT_FROM_REF {start} is not a commit")
@@ -62,23 +64,37 @@ def bases(path: str, start: str) -> list[str]:
     if not remote:
         return [start]
     end = os.environ.get("PRE_COMMIT_TO_REF") or "HEAD"
-    listed = git("rev-list", "--boundary", end, "--not", start, f"--remotes={remote}")
+    branch = os.environ.get("PRE_COMMIT_REMOTE_BRANCH", "").removeprefix("refs/heads/")
+    stale = [f"--exclude={remote}/{branch}"] if branch else []
+    listed = git(
+        "rev-list", "--boundary", end, "--not", start, *stale, f"--remotes={remote}"
+    )
     found = [line[1:] for line in listed.stdout.decode().split() if line[0] == "-"]
-    return found or [start]
+    return found or [end]
+
+
+def entries_at(path: str, commit: str) -> dict[Key, float] | None:
+    shown = git("show", f"{commit}:./{path}")
+    if shown.returncode:
+        return None
+    return parse_entries(shown.stdout.decode("utf-8"), f"{path} at {commit}")
 
 
 def based_entries(path: str, start: str) -> dict[Key, float] | None:
-    """Return each entry at its highest score in the bases that hold the file."""
+    """Return each entry at its highest score in the bases that hold the file.
+
+    When none holds it, but start does, as after a rebase of a branch that
+    adopted the baseline onto one that has none, compare with start.
+    """
     based: dict[Key, float] | None = None
     for commit in bases(path, start):
-        shown = git("show", f"{commit}:./{path}")
-        if shown.returncode:
+        entries = entries_at(path, commit)
+        if entries is None:
             continue
-        entries = parse_entries(shown.stdout.decode("utf-8"), f"{path} at {commit}")
         based = based or {}
         for key, score in entries.items():
             based[key] = max(score, based.get(key, score))
-    return based
+    return entries_at(path, start) if based is None else based
 
 
 @dataclass(frozen=True)
