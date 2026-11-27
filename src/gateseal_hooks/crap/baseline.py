@@ -54,9 +54,10 @@ def bases(path: str, start: str) -> list[str]:
     In a range, that is its start. At a push, start is the remote's tip of
     the pushed branch. The others are the commits that the remote already has
     and the pushed commits build on, so entries that a rebase or a merge
-    brings from another branch are not new. The pushed branch's tracking ref
-    may be stale, so it gives no base. A push of commits that the remote
-    already has keeps their entries.
+    brings from another branch are not new. A push of commits that the
+    remote already has keeps their entries. The bases come from the local
+    tracking refs, so a stale one can only let more entries pass; the CI gate
+    checks the range against its true base.
     """
     if git("rev-parse", "--verify", "--quiet", f"{start}^{{commit}}").returncode:
         raise InputError(path, f"PRE_COMMIT_FROM_REF {start} is not a commit")
@@ -64,10 +65,8 @@ def bases(path: str, start: str) -> list[str]:
     if not remote:
         return [start]
     end = os.environ.get("PRE_COMMIT_TO_REF") or "HEAD"
-    branch = os.environ.get("PRE_COMMIT_REMOTE_BRANCH", "").removeprefix("refs/heads/")
-    stale = [f"--exclude={remote}/{branch}"] if branch else []
     listed = git(
-        "rev-list", "--boundary", end, "--not", start, *stale, f"--remotes={remote}"
+        "rev-list", "--boundary", end, "--not", start, f"--remotes={remote}"
     ).stdout.decode()
     if not listed:
         return [end]
