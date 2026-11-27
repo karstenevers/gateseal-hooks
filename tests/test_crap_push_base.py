@@ -188,3 +188,41 @@ def test_fast_forward_to_published_commits_passes(root, capsys, monkeypatch):
     push(monkeypatch, old)
     code, out, _ = run(capsys)
     assert code == 0, out
+
+
+def test_shallow_history_compares_with_the_old_tip(root, capsys, monkeypatch):
+    baseline(root, {"m.py": {"old": 11, "new": 12}})
+    snapshot(root, "C0")
+    published("main")
+    git("switch", "-q", "-c", "feature")
+    old = snapshot(root, "feature work")
+    published("feature")
+    git("reset", "-q", "--hard", "main")
+    shallow = snapshot(root, "redo the work")
+    (root / ".git" / "shallow").write_text(shallow + "\n")
+    baseline(root, {"m.py": {"old": 11, "new": 12}, "own.py": {"f": 20}})
+    snapshot(root, "feature adds an entry")
+    push(monkeypatch, old)
+    code, out, _ = run(capsys)
+    assert code == 1
+    assert f"own.py f: a change may not add an entry to {BASELINE}." in out
+
+
+def test_rebase_keeps_the_entries_that_the_old_tip_published(root, capsys, monkeypatch):
+    snapshot(root, "C0")
+    published("main")
+    git("switch", "-q", "-c", "feature")
+    baseline(root, {"m.py": {"old": 11, "new": 12}})
+    snapshot(root, "adopt a baseline on the branch")
+    old = published("feature")
+    git("switch", "-q", "main")
+    baseline(root, {"m.py": {"old": 11}})
+    snapshot(root, "main adopts its own baseline")
+    published("main")
+    git("switch", "-q", "feature")
+    git("rebase", "-q", "-X", "theirs", "main")
+    baseline(root, {"m.py": {"old": 11, "new": 12}})
+    snapshot(root, "keep both entries")
+    push(monkeypatch, old)
+    code, out, _ = run(capsys)
+    assert code == 0, out
