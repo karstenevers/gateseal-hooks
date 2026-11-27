@@ -2,8 +2,9 @@
 
 A change may lower or remove an entry, but not add or raise one. When
 PRE_COMMIT_FROM_REF names a commit, as pre-commit sets it for a push or a
-range, the file is compared with its version at that commit. A baseline that
-the commit lacks is being adopted, so nothing is compared.
+range, the file is compared with its versions at the commits that the change
+builds on. An entry may stay at the highest score that any of them holds. A
+baseline that none of them holds is being adopted, so nothing is compared.
 """
 
 import math
@@ -43,16 +44,41 @@ def parse_entries(text: str, path: str) -> dict[Key, float]:
     return entries
 
 
-def committed(path: str, commit: str) -> str | None:
-    """Return path's text at commit, or None when the commit lacks the file."""
+def git(*arguments: str) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(["git", *arguments], capture_output=True, check=False)
 
-    def git(*arguments: str) -> subprocess.CompletedProcess[bytes]:
-        return subprocess.run(["git", *arguments], capture_output=True, check=False)
 
-    if git("rev-parse", "--verify", "--quiet", f"{commit}^{{commit}}").returncode:
-        raise InputError(path, f"PRE_COMMIT_FROM_REF {commit} is not a commit")
-    shown = git("show", f"{commit}:./{path}")
-    return shown.stdout.decode("utf-8") if shown.returncode == 0 else None
+def bases(path: str, start: str) -> list[str]:
+    """Return the commits that the change from start builds on.
+
+    In a range, that is its start. At a push, they are the commits that the
+    remote already has and the pushed commits build on, so entries that a
+    rebase or a merge brings from another branch are not new, and neither are
+    those of a rewritten branch's old tip.
+    """
+    if git("rev-parse", "--verify", "--quiet", f"{start}^{{commit}}").returncode:
+        raise InputError(path, f"PRE_COMMIT_FROM_REF {start} is not a commit")
+    remote = os.environ.get("PRE_COMMIT_REMOTE_NAME")
+    if not remote:
+        return [start]
+    end = os.environ.get("PRE_COMMIT_TO_REF") or "HEAD"
+    listed = git("rev-list", "--boundary", end, "--not", start, f"--remotes={remote}")
+    found = [line[1:] for line in listed.stdout.decode().split() if line[0] == "-"]
+    return found or [start]
+
+
+def based_entries(path: str, start: str) -> dict[Key, float] | None:
+    """Return each entry at its highest score in the bases that hold the file."""
+    based: dict[Key, float] | None = None
+    for commit in bases(path, start):
+        shown = git("show", f"{commit}:./{path}")
+        if shown.returncode:
+            continue
+        entries = parse_entries(shown.stdout.decode("utf-8"), f"{path} at {commit}")
+        based = based or {}
+        for key, score in entries.items():
+            based[key] = max(score, based.get(key, score))
+    return based
 
 
 @dataclass(frozen=True)
@@ -119,7 +145,6 @@ def load_baseline(path: str) -> Baseline:
         return Baseline(path, {}, None)
     except (OSError, UnicodeDecodeError) as error:
         raise InputError(path, f"cannot read: {error}") from error
-    commit = os.environ.get("PRE_COMMIT_FROM_REF", "")
-    before = committed(path, commit) if commit else None
-    based = None if before is None else parse_entries(before, f"{path} at {commit}")
+    start = os.environ.get("PRE_COMMIT_FROM_REF", "")
+    based = based_entries(path, start) if start else None
     return Baseline(path, parse_entries(text, path), based)

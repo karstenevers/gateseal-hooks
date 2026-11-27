@@ -78,7 +78,7 @@ Run coverage.py from the repository root, so the report names files the way pre-
 
 A function on the baseline passes until its score grows past its entry. When it falls to the limit or below, or when it is gone, the hook asks you to remove its entry. Do not add an entry for new code. Split or test the function.
 
-When pre-commit checks a push or a range, the hook compares the baseline with its version at the start of the range. A change that adds an entry or raises one then fails. A change that touches no Python file does not start the hook, so review each change to the baseline.
+When pre-commit checks a range, the hook compares the baseline with its version at the start of the range. At a push, it compares with every commit that the remote already has and the pushed commits build on, so entries that a rebase or a merge brings in are not new. A change that adds an entry or raises one past all of them then fails. A change that touches no Python file does not start the hook, so review each change to the baseline.
 
 **Options.** `--coverage path.json` reads another report. `--limit 15` sets another limit. `--config path.toml` reads the limit from a file that holds only `limit = 15`. `--baseline path.toml` reads the baseline from another file.
 
